@@ -1,7 +1,6 @@
 import asyncio
 import json
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from google import genai
 
@@ -37,7 +36,7 @@ Provide your analysis in the following JSON format:
 Be concise and practical. Focus on actionable insights for developers."""
 
 
-_genai_client: Optional[genai.Client] = None
+_genai_client: genai.Client | None = None
 
 
 def _get_genai_client() -> genai.Client:
@@ -104,7 +103,7 @@ async def analyze_single_repo(
     )
 
     basic_scores = _calculate_basic_scores(repo)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     try:
         response = await asyncio.to_thread(
@@ -125,6 +124,7 @@ async def analyze_single_repo(
 
         return AnalyzedRepo(
             rank=repo.rank,
+            github_id=repo.github_id,
             owner=repo.owner,
             name=repo.name,
             full_name=repo.full_name,
@@ -165,6 +165,7 @@ async def analyze_single_repo(
     except (json.JSONDecodeError, Exception):
         return AnalyzedRepo(
             rank=repo.rank,
+            github_id=repo.github_id,
             owner=repo.owner,
             name=repo.name,
             full_name=repo.full_name,
@@ -202,9 +203,10 @@ async def analyze_single_repo(
 
 
 def _enriched_to_analyzed(repo: EnrichedRepo, scores: dict[str, int]) -> AnalyzedRepo:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return AnalyzedRepo(
         rank=repo.rank,
+        github_id=repo.github_id,
         owner=repo.owner,
         name=repo.name,
         full_name=repo.full_name,

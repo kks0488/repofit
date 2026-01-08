@@ -1,13 +1,11 @@
-from typing import Optional
-from datetime import datetime, timezone
 
-from src.storage import SupabaseStorage
 from src.embedder.gemini_embedder import (
-    embed_text,
-    create_repo_summary,
     create_project_summary,
+    create_repo_summary,
+    embed_text,
 )
 from src.notifier import SlackNotifier
+from src.storage import SupabaseStorage
 
 
 class Recommender:
@@ -18,7 +16,7 @@ class Recommender:
         self,
         project_stack: list[str],
         project_tags: list[str],
-        repo_language: Optional[str],
+        repo_language: str | None,
         repo_topics: list[str],
     ) -> tuple[float, list[str]]:
         project_terms = set(t.lower() for t in project_stack + project_tags)
@@ -88,29 +86,30 @@ class Recommender:
             min_stars=min_stars,
         )
 
+        repo_ids = [r["repository_id"] for r in similar_repos]
+        repo_metadata = self.storage.get_repo_metadata_by_ids(repo_ids)
+
         recommendations = []
         for repo_match in similar_repos:
             repo_id = repo_match["repository_id"]
             full_name = repo_match["full_name"]
             embedding_sim = repo_match["similarity"]
-
-            trending = self.storage.get_latest_trending(limit=100)
-            repo_data = next((t for t in trending if t["full_name"] == full_name), None)
-
-            if not repo_data:
-                continue
+            repo_data = repo_metadata.get(repo_id, {})
 
             stack_score, overlaps = self._calculate_stack_overlap(
                 project_stack=project.get("tech_stack", []),
                 project_tags=project.get("tags", []),
                 repo_language=repo_data.get("language"),
-                repo_topics=repo_data.get("topics", []),
+                repo_topics=repo_data.get("topics") or [],
             )
+
+            overall_score = repo_data.get("overall_score")
+            quality_score = min(1.0, ((overall_score or 50) / 100))
 
             final_score = (
                 0.5 * embedding_sim +
                 0.3 * stack_score +
-                0.2 * min(1.0, (repo_data.get("overall_score", 50) / 100))
+                0.2 * quality_score
             )
 
             reasons = []
@@ -135,6 +134,7 @@ class Recommender:
                 "full_name": full_name,
                 "score": final_score,
                 "reasons": reasons,
+                "stars": repo_data.get("stars", 0),
             })
 
         recommendations.sort(key=lambda x: x["score"], reverse=True)
@@ -145,6 +145,7 @@ class Recommender:
         min_stars: int = 100,
         notify: bool = False,
         score_threshold: float = 0.7,
+        trending_summary: dict | None = None,
     ) -> dict:
         repos_embedded = self.embed_new_repos()
         projects_embedded = self.embed_new_projects()
@@ -174,6 +175,7 @@ class Recommender:
                 if notifier.notify_recommendations(
                     recommendations=high_score_recs,
                     threshold=score_threshold,
+                    trending_summary=trending_summary,
                 ):
                     notified_count = len(high_score_recs)
 
@@ -190,10 +192,12 @@ def run_matching_pipeline(
     min_stars: int = 100,
     notify: bool = False,
     score_threshold: float = 0.7,
+    trending_summary: dict | None = None,
 ) -> dict:
     recommender = Recommender()
     return recommender.run_full_pipeline(
         min_stars=min_stars,
         notify=notify,
         score_threshold=score_threshold,
+        trending_summary=trending_summary,
     )

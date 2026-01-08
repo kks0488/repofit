@@ -75,21 +75,21 @@ def print_repo_detail(repo: AnalyzedRepo) -> None:
     title = f":package: {repo.full_name}"
 
     info_text = Text()
-    info_text.append(f"Stars: ", style="bold")
+    info_text.append("Stars: ", style="bold")
     info_text.append(f"{_format_number(repo.stars)} ", style="yellow")
     info_text.append(f"(+{repo.stars_today} today)\n", style="green")
 
-    info_text.append(f"Forks: ", style="bold")
+    info_text.append("Forks: ", style="bold")
     info_text.append(f"{_format_number(repo.forks)}\n", style="cyan")
 
-    info_text.append(f"Language: ", style="bold")
+    info_text.append("Language: ", style="bold")
     info_text.append(f"{repo.language or 'Unknown'}\n", style="magenta")
 
-    info_text.append(f"License: ", style="bold")
+    info_text.append("License: ", style="bold")
     info_text.append(f"{repo.license or 'Unknown'}\n", style="blue")
 
     if repo.topics:
-        info_text.append(f"Topics: ", style="bold")
+        info_text.append("Topics: ", style="bold")
         info_text.append(f"{', '.join(repo.topics[:5])}\n", style="dim")
 
     console.print(Panel(info_text, title=title, border_style="blue"))

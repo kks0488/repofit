@@ -9,9 +9,16 @@ AI-powered GitHub Trending analyzer that learns your projects and recommends rep
 - **AI Scoring & Summaries**: Gemini analysis with heuristic fallback when AI is disabled
 - **Project Profiles**: Register projects with stack, tags, and goals
 - **Smart Matching**: Two-stage matcher (pgvector similarity + stack overlap + quality)
+- **GitHub Search Discovery**: Find repos beyond trending using project-based queries
 - **Snapshots & History**: Save runs and track trending history over time
 - **Slack Alerts (Optional)**: Notify on high-score matches
 - **Web Dashboard**: Next.js UI for Trending, Projects, and Recommendations
+
+## Recent Updates
+
+- Added GitHub Search discovery with `gt discover` to find and save repos beyond Trending.
+- Matching now runs against stored repositories (trending + discovered), not only the latest snapshot.
+- Daily Slack runs send a trending summary when no recommendations pass the threshold.
 
 ## Architecture
 
@@ -142,13 +149,15 @@ npm run dev
 | `gt match` | Find matching repos |
 | `gt match --project <id>` | Match a single project |
 | `gt recommendations` | View AI recommendations |
+| `gt discover` | Discover GitHub repos that fit your projects |
 | `gt sync` | Full pipeline (fetch → analyze → save → match) |
 | `gt match --notify` | Match and send Slack notification |
 | `gt sync --notify` | Full pipeline with Slack notification |
 
 ## Smart Matching
 
-The recommendation engine uses a 2-stage approach:
+The recommendation engine uses a 2-stage approach across all stored repositories
+(trending + discovered):
 
 1. **Stage 1 - Fast Filter**:
    - Tech stack overlap (languages, frameworks)
@@ -164,6 +173,18 @@ The recommendation engine uses a 2-stage approach:
 score = 0.5 × embedding_similarity 
       + 0.3 × stack_overlap 
       + 0.2 × quality_score
+```
+
+## Discovery (GitHub Search)
+
+Use `gt discover` to find repos that match your project tags/stack and save them for matching.
+
+```bash
+# Discover based on a registered project
+gt discover --project <id> --min-stars 50
+
+# Or run a custom GitHub search query
+gt discover --query "topic:fastapi stars:>=100"
 ```
 
 ## Tech Stack
@@ -224,6 +245,7 @@ Use the bundled workflow at `.github/workflows/daily-sync.yml` and add these sec
 - `SLACK_CHANNEL_ID`
 
 The workflow runs `gt sync --notify` once per day (09:00 KST).
+If there are no recommendations above the threshold, it sends a daily trending summary instead.
 
 ## Slack Notifications
 

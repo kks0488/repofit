@@ -1,4 +1,3 @@
-from typing import Optional
 
 import httpx
 
@@ -8,8 +7,8 @@ from src.config import get_settings
 class SlackNotifier:
     def __init__(
         self,
-        token: Optional[str] = None,
-        channel_id: Optional[str] = None,
+        token: str | None = None,
+        channel_id: str | None = None,
     ) -> None:
         settings = get_settings()
         self.token = token or settings.slack_bot_token
@@ -25,8 +24,8 @@ class SlackNotifier:
     def send_message(
         self,
         text: str,
-        blocks: Optional[list[dict]] = None,
-        thread_ts: Optional[str] = None,
+        blocks: list[dict] | None = None,
+        thread_ts: str | None = None,
     ) -> bool:
         if not self.is_configured():
             return False
@@ -55,8 +54,8 @@ class SlackNotifier:
     def notify_trending_summary(
         self,
         total_repos: int,
-        language: Optional[str] = None,
-        top_repos: Optional[list[dict]] = None,
+        language: str | None = None,
+        top_repos: list[dict] | None = None,
     ) -> bool:
         blocks = self._build_trending_blocks(total_repos, language, top_repos or [])
         fallback = f"GitHub Trending: {total_repos} repos analyzed ({language or 'All'})"
@@ -66,7 +65,7 @@ class SlackNotifier:
         self,
         recommendations: list[dict],
         threshold: float,
-        trending_summary: Optional[dict] = None,
+        trending_summary: dict | None = None,
     ) -> bool:
         if not recommendations:
             return False
@@ -84,7 +83,7 @@ class SlackNotifier:
     def _build_trending_blocks(
         self,
         total_repos: int,
-        language: Optional[str],
+        language: str | None,
         top_repos: list[dict],
     ) -> list[dict]:
         blocks: list[dict] = []
@@ -126,7 +125,7 @@ class SlackNotifier:
         self,
         recommendations: list[dict],
         threshold: float,
-        trending_summary: Optional[dict] = None,
+        trending_summary: dict | None = None,
     ) -> list[dict]:
         blocks: list[dict] = []
 

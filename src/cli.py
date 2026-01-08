@@ -1,7 +1,6 @@
 import asyncio
 import os
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -34,19 +33,19 @@ def _write_env_file(path: Path, values: dict[str, str]) -> None:
 
 @app.command()
 def trending(
-    language: Optional[str] = typer.Option(None, "--lang", "-l", help="Filter by programming language"),
+    language: str | None = typer.Option(None, "--lang", "-l", help="Filter by programming language"),
     since: str = typer.Option("daily", "--since", "-s", help="Time range: daily, weekly, monthly"),
     limit: int = typer.Option(25, "--limit", "-n", help="Number of repositories to show"),
     enrich: bool = typer.Option(True, "--enrich/--no-enrich", help="Fetch additional metadata from GitHub API"),
     analyze: bool = typer.Option(False, "--analyze/--no-analyze", "-a", help="Run AI analysis (requires Gemini API)"),
     save: bool = typer.Option(False, "--save", help="Save results to Supabase"),
 ) -> None:
+    from src.analyzer import analyze_repos
     from src.collector import fetch_trending
     from src.enricher import enrich_repos
-    from src.analyzer import analyze_repos
+    from src.models import EnrichedRepo
     from src.reporter import print_trending
     from src.storage import SupabaseStorage
-    from src.models import EnrichedRepo
 
     async def run() -> None:
         with console.status("[bold green]Fetching trending repositories..."):
@@ -102,12 +101,10 @@ def inspect(
     repo: str = typer.Argument(..., help="Repository name (owner/repo)"),
     analyze: bool = typer.Option(True, "--analyze/--no-analyze", "-a", help="Run AI analysis"),
 ) -> None:
-    import httpx
-    from datetime import datetime, timezone
 
-    from src.models import TrendingRepo, EnrichedRepo
-    from src.enricher import enrich_repos
     from src.analyzer import analyze_repos
+    from src.enricher import enrich_repos
+    from src.models import TrendingRepo
     from src.reporter import print_repo_detail
 
     async def run() -> None:
@@ -146,6 +143,7 @@ def history(
     limit: int = typer.Option(30, "--limit", "-n", help="Number of entries to show"),
 ) -> None:
     from rich.table import Table
+
     from src.storage import SupabaseStorage
 
     storage = SupabaseStorage()
@@ -177,6 +175,7 @@ def snapshots(
     limit: int = typer.Option(10, "--limit", "-n", help="Number of snapshots to show"),
 ) -> None:
     from rich.table import Table
+
     from src.storage import SupabaseStorage
 
     storage = SupabaseStorage()
@@ -291,9 +290,9 @@ def init(
 
 @app.command()
 def quickstart(
-    language: Optional[str] = typer.Option(None, "--lang", "-l"),
+    language: str | None = typer.Option(None, "--lang", "-l"),
     limit: int = typer.Option(25, "--limit", "-n", help="Number of repositories to fetch"),
-    analyze: Optional[bool] = typer.Option(
+    analyze: bool | None = typer.Option(
         None,
         "--analyze/--no-analyze",
         "-a",
@@ -301,12 +300,12 @@ def quickstart(
     ),
 ) -> None:
     """Seed trending data and optionally generate recommendations."""
-    from src.config import get_settings
-    from src.collector import fetch_trending
-    from src.enricher import enrich_repos
     from src.analyzer import analyze_repos
-    from src.storage import SupabaseStorage
+    from src.collector import fetch_trending
+    from src.config import get_settings
+    from src.enricher import enrich_repos
     from src.matcher import Recommender
+    from src.storage import SupabaseStorage
 
     try:
         settings = get_settings()
@@ -361,12 +360,123 @@ def quickstart(
     asyncio.run(run())
 
 
+@app.command()
+def discover(
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID to discover for"),
+    query: str | None = typer.Option(None, "--query", "-q", help="Custom GitHub search query"),
+    limit: int = typer.Option(30, "--limit", "-n", help="Max repositories to return"),
+    min_stars: int = typer.Option(50, "--min-stars", help="Minimum stars filter"),
+    enrich: bool = typer.Option(True, "--enrich/--no-enrich", help="Fetch additional metadata from GitHub API"),
+    analyze: bool | None = typer.Option(
+        None,
+        "--analyze/--no-analyze",
+        "-a",
+        help="Run AI analysis when GEMINI_API_KEY is set",
+    ),
+    save: bool = typer.Option(True, "--save/--no-save", help="Save results to Supabase"),
+) -> None:
+    """Discover GitHub repositories that fit your projects."""
+    from src.analyzer import analyze_repos
+    from src.collector import build_project_queries, search_github_repos
+    from src.config import get_settings
+    from src.enricher import enrich_repos
+    from src.models import EnrichedRepo, TrendingRepo
+    from src.reporter import print_trending
+    from src.storage import SupabaseStorage
+
+    try:
+        settings = get_settings()
+    except Exception as exc:
+        console.print(f"[red]Configuration error: {exc}[/red]")
+        raise typer.Exit(1)
+
+    if analyze is None:
+        use_ai = bool(settings.gemini_api_key)
+    elif analyze and not settings.gemini_api_key:
+        console.print("[yellow]GEMINI_API_KEY not set. Running without AI analysis.[/yellow]")
+        use_ai = False
+    else:
+        use_ai = bool(analyze)
+
+    storage = SupabaseStorage()
+    queries: list[str] = []
+
+    if query:
+        queries = [query]
+    else:
+        projects = [storage.get_project(project_id)] if project_id else storage.get_projects()
+        projects = [p for p in projects if p]
+        if not projects:
+            console.print("[yellow]No projects found. Add one with gt project-add.[/yellow]")
+            raise typer.Exit(0)
+
+        for project in projects:
+            queries.extend(build_project_queries(project, min_stars=min_stars))
+
+    queries = list(dict.fromkeys([q.strip() for q in queries if q.strip()]))
+    if not queries:
+        console.print("[red]No search queries generated.[/red]")
+        raise typer.Exit(1)
+
+    per_query = max(5, min(50, limit))
+    if len(queries) > 1:
+        per_query = max(5, min(50, max(1, limit // len(queries))))
+
+    async def run() -> None:
+        all_repos = []
+        with console.status("[bold green]Searching GitHub..."):
+            for q in queries:
+                repos = await search_github_repos(q, per_page=per_query)
+                all_repos.extend(repos)
+
+        if not all_repos:
+            console.print("[red]No repositories found.[/red]")
+            raise typer.Exit(1)
+
+        repo_map: dict[str, TrendingRepo] = {}
+        for repo in all_repos:
+            existing = repo_map.get(repo.full_name)
+            if existing is None or repo.stars > existing.stars:
+                repo_map[repo.full_name] = repo
+
+        repos = list(repo_map.values())
+        if min_stars > 0:
+            repos = [repo for repo in repos if repo.stars >= min_stars]
+
+        repos = sorted(repos, key=lambda r: r.stars, reverse=True)
+        repos = repos[:limit]
+        for rank, repo in enumerate(repos, start=1):
+            repo.rank = rank
+
+        console.print(f"[green]Found {len(repos)} unique repositories[/green]")
+
+        if enrich:
+            with console.status("[bold blue]Enriching with GitHub API data..."):
+                enriched_repos = await enrich_repos(repos)
+        else:
+            enriched_repos = [EnrichedRepo(**repo.model_dump()) for repo in repos]
+
+        with console.status("[bold yellow]Analyzing..."):
+            analyzed = await analyze_repos(enriched_repos, skip_ai=not use_ai)
+
+        print_trending(analyzed, title="Discover Results")
+
+        if save:
+            with console.status("[bold magenta]Saving to database..."):
+                storage.upsert_repositories(analyzed)
+            console.print("[green]Saved discovered repositories.[/green]")
+            console.print("Next: run [cyan]gt match[/cyan] to score against your projects.")
+
+    asyncio.run(run())
+
+
 # ==================== PROJECT MANAGEMENT ====================
 
 @app.command()
 def projects() -> None:
     """List registered projects."""
     from rich.table import Table
+
     from src.storage import SupabaseStorage
 
     storage = SupabaseStorage()
@@ -397,10 +507,10 @@ def projects() -> None:
 @app.command(name="project-add")
 def project_add(
     name: str = typer.Option(..., "--name", "-n", prompt="Project name"),
-    description: Optional[str] = typer.Option(None, "--desc", "-d"),
-    stack: Optional[str] = typer.Option(None, "--stack", "-s", help="Comma-separated tech stack"),
-    tags: Optional[str] = typer.Option(None, "--tags", "-t", help="Comma-separated tags"),
-    goals: Optional[str] = typer.Option(None, "--goals", "-g"),
+    description: str | None = typer.Option(None, "--desc", "-d"),
+    stack: str | None = typer.Option(None, "--stack", "-s", help="Comma-separated tech stack"),
+    tags: str | None = typer.Option(None, "--tags", "-t", help="Comma-separated tags"),
+    goals: str | None = typer.Option(None, "--goals", "-g"),
 ) -> None:
     """Register a new project for smart recommendations."""
     from src.storage import SupabaseStorage
@@ -424,7 +534,7 @@ def project_add(
 
 @app.command()
 def match(
-    project_id: Optional[str] = typer.Option(None, "--project", "-p", help="Project ID to match"),
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID to match"),
     min_stars: int = typer.Option(100, "--min-stars", help="Minimum stars filter"),
     limit: int = typer.Option(10, "--limit", "-n"),
     notify: bool = typer.Option(False, "--notify", help="Send Slack notification for high-score matches"),
@@ -432,6 +542,7 @@ def match(
 ) -> None:
     """Find trending repos that match your projects."""
     from rich.table import Table
+
     from src.matcher import Recommender
 
     recommender = Recommender()
@@ -484,11 +595,12 @@ def match(
 
 @app.command()
 def recommendations(
-    project_id: Optional[str] = typer.Option(None, "--project", "-p"),
+    project_id: str | None = typer.Option(None, "--project", "-p"),
     limit: int = typer.Option(20, "--limit", "-n"),
 ) -> None:
     """Show AI-powered recommendations."""
     from rich.table import Table
+
     from src.storage import SupabaseStorage
 
     storage = SupabaseStorage()
@@ -518,17 +630,18 @@ def recommendations(
 
 @app.command()
 def sync(
-    language: Optional[str] = typer.Option(None, "--lang", "-l"),
+    language: str | None = typer.Option(None, "--lang", "-l"),
     analyze: bool = typer.Option(True, "--analyze/--no-analyze", "-a"),
     notify: bool = typer.Option(False, "--notify", help="Send Slack notification for high-score matches"),
     score_threshold: float = typer.Option(0.7, "--score-threshold", help="Minimum score for notification (0.0-1.0)"),
 ) -> None:
     """Full sync: fetch trending, analyze, save, and match."""
+    from src.analyzer import analyze_repos
     from src.collector import fetch_trending
     from src.enricher import enrich_repos
-    from src.analyzer import analyze_repos
-    from src.storage import SupabaseStorage
     from src.matcher import Recommender
+    from src.notifier import SlackNotifier
+    from src.storage import SupabaseStorage
 
     async def run() -> None:
         with console.status("[bold green]Fetching trending..."):
@@ -547,15 +660,38 @@ def sync(
             snapshot_id = storage.save_snapshot(analyzed, language=language)
             console.print(f"[green]Saved snapshot: {snapshot_id}[/green]")
 
+        trending_summary = {
+            "language": language,
+            "total_repos": len(analyzed),
+            "top_repos": [
+                {
+                    "full_name": repo.full_name,
+                    "stars": repo.stars,
+                    "stars_today": repo.stars_today,
+                    "language": repo.language,
+                }
+                for repo in analyzed[:5]
+            ],
+        }
+
         with console.status("[bold cyan]Running matching pipeline..."):
             recommender = Recommender()
             result = recommender.run_full_pipeline(
                 notify=notify,
                 score_threshold=score_threshold,
+                trending_summary=trending_summary,
             )
             console.print(f"[green]Generated {result['total_recommendations']} recommendations[/green]")
             if notify and result.get("notified_count", 0) > 0:
                 console.print(f"[cyan]Sent Slack notification for {result['notified_count']} high-score matches[/cyan]")
+            elif notify:
+                notifier = SlackNotifier()
+                if notifier.notify_trending_summary(
+                    total_repos=trending_summary["total_repos"],
+                    language=trending_summary["language"],
+                    top_repos=trending_summary["top_repos"],
+                ):
+                    console.print("[cyan]Sent daily Slack summary[/cyan]")
 
         console.print("\n[bold green]:white_check_mark: Sync complete![/bold green]")
         console.print("View recommendations: [cyan]gt recommendations[/cyan]")

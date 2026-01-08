@@ -1,4 +1,3 @@
-from typing import Optional
 
 from google import genai
 
@@ -30,7 +29,7 @@ class GeminiEmbedder:
         return embeddings
 
 
-_embedder: Optional[GeminiEmbedder] = None
+_embedder: GeminiEmbedder | None = None
 
 
 def _get_embedder() -> GeminiEmbedder:
@@ -50,10 +49,10 @@ def embed_batch(texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT") -> list
 
 def create_repo_summary(
     full_name: str,
-    description: Optional[str],
-    language: Optional[str],
+    description: str | None,
+    language: str | None,
     topics: list[str],
-    readme_summary: Optional[str] = None,
+    readme_summary: str | None = None,
 ) -> str:
     parts = [f"Repository: {full_name}"]
     if description:
@@ -69,11 +68,11 @@ def create_repo_summary(
 
 def create_project_summary(
     name: str,
-    description: Optional[str],
+    description: str | None,
     tech_stack: list[str],
     tags: list[str],
-    goals: Optional[str] = None,
-    readme_excerpt: Optional[str] = None,
+    goals: str | None = None,
+    readme_excerpt: str | None = None,
 ) -> str:
     parts = [f"Project: {name}"]
     if description:

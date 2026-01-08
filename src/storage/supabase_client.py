@@ -1,8 +1,7 @@
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 from uuid import UUID
 
-from supabase import create_client, Client
+from supabase import Client, create_client
 
 from src.config import get_settings
 from src.models import AnalyzedRepo
@@ -19,7 +18,7 @@ class SupabaseStorage:
     def save_snapshot(
         self,
         repos: list[AnalyzedRepo],
-        language: Optional[str] = None,
+        language: str | None = None,
         since: str = "daily",
     ) -> UUID:
         snapshot_result = (
@@ -28,7 +27,7 @@ class SupabaseStorage:
                 "language": language,
                 "since": since,
                 "repo_count": len(repos),
-                "collected_at": datetime.now(timezone.utc).isoformat(),
+                "collected_at": datetime.now(UTC).isoformat(),
             })
             .execute()
         )
@@ -47,8 +46,11 @@ class SupabaseStorage:
                 "stars": repo.stars,
                 "forks": repo.forks,
                 "open_issues": repo.open_issues,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
             }
+            if repo.github_id is not None:
+                repo_data["github_id"] = repo.github_id
+
             if repo.created_at:
                 repo_data["first_seen_at"] = repo.created_at.isoformat()
 
@@ -87,11 +89,108 @@ class SupabaseStorage:
 
         return UUID(snapshot_id)
 
-    def get_latest_trending(self, language: Optional[str] = None, limit: int = 25) -> list[dict]:
+    def upsert_repositories(self, repos: list[AnalyzedRepo]) -> list[str]:
+        now = datetime.now(UTC)
+        repo_ids: list[str] = []
+
+        for repo in repos:
+            repo_data = {
+                "full_name": repo.full_name,
+                "owner": repo.owner,
+                "name": repo.name,
+                "url": repo.url,
+                "description": repo.description,
+                "language": repo.language,
+                "license": repo.license,
+                "topics": repo.topics,
+                "stars": repo.stars,
+                "forks": repo.forks,
+                "open_issues": repo.open_issues,
+                "updated_at": now.isoformat(),
+            }
+
+            if repo.github_id is not None:
+                repo_data["github_id"] = repo.github_id
+
+            if repo.created_at:
+                repo_data["first_seen_at"] = repo.created_at.isoformat()
+
+            repo_result = (
+                self._client.table("gt_repositories")
+                .upsert(repo_data, on_conflict="full_name")
+                .execute()
+            )
+            repo_id = repo_result.data[0]["id"]
+            repo_ids.append(repo_id)
+
+            if repo.summary or repo.overall_score > 0:
+                self._client.table("gt_analyses").insert({
+                    "repository_id": repo_id,
+                    "health_score": repo.health_score,
+                    "activity_score": repo.activity_score,
+                    "community_score": repo.community_score,
+                    "documentation_score": repo.documentation_score,
+                    "overall_score": repo.overall_score,
+                    "summary": repo.summary,
+                    "use_cases": repo.use_cases,
+                    "integration_tips": repo.integration_tips,
+                    "potential_risks": repo.potential_risks,
+                    "model_used": get_settings().gemini_model,
+                    "analyzed_at": repo.analyzed_at.isoformat() if repo.analyzed_at else None,
+                }).execute()
+
+        return repo_ids
+
+    def get_latest_trending(self, language: str | None = None, limit: int = 25) -> list[dict]:
         query = self._client.table("gt_v_latest_trending").select("*")
         if language:
             query = query.eq("language", language)
         return query.limit(limit).execute().data
+
+    def get_repo_metadata_by_ids(self, repo_ids: list[str]) -> dict[str, dict]:
+        if not repo_ids:
+            return {}
+
+        repos = (
+            self._client.table("gt_repositories")
+            .select("id, full_name, language, topics, stars")
+            .in_("id", repo_ids)
+            .execute()
+            .data
+        )
+
+        analyses = (
+            self._client.table("gt_analyses")
+            .select("repository_id, overall_score, analyzed_at")
+            .in_("repository_id", repo_ids)
+            .order("analyzed_at", desc=True)
+            .execute()
+            .data
+        )
+
+        trending = (
+            self._client.table("gt_v_latest_trending")
+            .select("id, stars_today")
+            .in_("id", repo_ids)
+            .execute()
+            .data
+        )
+
+        analysis_map: dict[str, dict] = {}
+        for analysis in analyses:
+            repo_id = analysis.get("repository_id")
+            if repo_id and repo_id not in analysis_map:
+                analysis_map[repo_id] = analysis
+
+        trending_map = {row.get("id"): row for row in trending if row.get("id")}
+
+        repo_map: dict[str, dict] = {}
+        for repo in repos:
+            repo["overall_score"] = analysis_map.get(repo["id"], {}).get("overall_score")
+            repo["stars_today"] = trending_map.get(repo["id"], {}).get("stars_today", 0)
+            repo_map[repo["id"]] = repo
+
+        return repo_map
 
     def get_repo_history(self, full_name: str, limit: int = 30) -> list[dict]:
         repo = self._client.table("gt_repositories").select("id").eq("full_name", full_name).single().execute()
@@ -122,11 +221,11 @@ class SupabaseStorage:
     def create_project(
         self,
         name: str,
-        description: Optional[str] = None,
-        tech_stack: Optional[list[str]] = None,
-        tags: Optional[list[str]] = None,
-        goals: Optional[str] = None,
-        readme_content: Optional[str] = None,
+        description: str | None = None,
+        tech_stack: list[str] | None = None,
+        tags: list[str] | None = None,
+        goals: str | None = None,
+        readme_content: str | None = None,
     ) -> dict:
         return (
             self._client.table("gt_my_projects")
@@ -148,25 +247,25 @@ class SupabaseStorage:
             query = query.eq("is_active", True)
         return query.order("created_at", desc=True).execute().data
 
-    def get_project(self, project_id: str) -> Optional[dict]:
+    def get_project(self, project_id: str) -> dict | None:
         result = self._client.table("gt_my_projects").select("*").eq("id", project_id).single().execute()
         return result.data if result.data else None
 
     def update_project_embedding(self, project_id: str, embedding: list[float]) -> None:
         self._client.table("gt_my_projects").update({
             "embedding": embedding,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }).eq("id", project_id).execute()
 
     def update_repo_embedding(self, repo_id: str, embedding: list[float]) -> None:
         self._client.table("gt_repositories").update({
             "embedding": embedding,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }).eq("id", repo_id).execute()
 
     # ==================== RECOMMENDATIONS ====================
 
-    def get_recommendations(self, project_id: Optional[str] = None, limit: int = 20) -> list[dict]:
+    def get_recommendations(self, project_id: str | None = None, limit: int = 20) -> list[dict]:
         query = self._client.table("gt_v_recommendations").select("*")
         if project_id:
             query = query.eq("project_id", project_id)
@@ -178,8 +277,8 @@ class SupabaseStorage:
         repository_id: str,
         score: float,
         reasons: list[dict],
-        embedding_similarity: Optional[float] = None,
-        stack_overlap_score: Optional[float] = None,
+        embedding_similarity: float | None = None,
+        stack_overlap_score: float | None = None,
     ) -> dict:
         return (
             self._client.table("gt_recommendations")
@@ -199,10 +298,10 @@ class SupabaseStorage:
     def dismiss_recommendation(self, recommendation_id: str) -> None:
         self._client.table("gt_recommendations").update({
             "status": "dismissed",
-            "dismissed_at": datetime.now(timezone.utc).isoformat(),
+            "dismissed_at": datetime.now(UTC).isoformat(),
         }).eq("id", recommendation_id).execute()
 
-    def save_feedback(self, recommendation_id: str, feedback_type: str, note: Optional[str] = None) -> dict:
+    def save_feedback(self, recommendation_id: str, feedback_type: str, note: str | None = None) -> dict:
         return (
             self._client.table("gt_feedback")
             .insert({
@@ -216,7 +315,7 @@ class SupabaseStorage:
 
     # ==================== BOOKMARKS ====================
 
-    def add_bookmark(self, repository_id: str, project_id: Optional[str] = None, notes: Optional[str] = None) -> dict:
+    def add_bookmark(self, repository_id: str, project_id: str | None = None, notes: str | None = None) -> dict:
         return (
             self._client.table("gt_bookmarks")
             .upsert({
@@ -229,7 +328,7 @@ class SupabaseStorage:
             .data[0]
         )
 
-    def get_bookmarks(self, project_id: Optional[str] = None) -> list[dict]:
+    def get_bookmarks(self, project_id: str | None = None) -> list[dict]:
         query = (
             self._client.table("gt_bookmarks")
             .select("*, gt_repositories(*)")

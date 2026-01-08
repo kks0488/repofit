@@ -1,5 +1,5 @@
 import re
-from typing import Literal, Optional
+from typing import Literal
 
 import httpx
 from selectolax.parser import HTMLParser
@@ -27,7 +27,7 @@ def _parse_number(text: str) -> int:
     return int(cleaned) if cleaned else 0
 
 
-def _build_url(language: Optional[str] = None, since: SinceFilter = "daily") -> str:
+def _build_url(language: str | None = None, since: SinceFilter = "daily") -> str:
     url = GITHUB_TRENDING_URL
     if language:
         url = f"{url}/{language.lower()}"
@@ -35,7 +35,7 @@ def _build_url(language: Optional[str] = None, since: SinceFilter = "daily") -> 
 
 
 async def fetch_trending(
-    language: Optional[str] = None,
+    language: str | None = None,
     since: SinceFilter = "daily",
     timeout: float = 30.0,
 ) -> list[TrendingRepo]:
@@ -111,7 +111,7 @@ async def fetch_trending(
 
 
 async def fetch_trending_sync(
-    language: Optional[str] = None,
+    language: str | None = None,
     since: SinceFilter = "daily",
 ) -> list[TrendingRepo]:
     import asyncio

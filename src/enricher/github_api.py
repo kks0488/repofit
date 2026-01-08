@@ -1,5 +1,4 @@
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 import httpx
 
@@ -20,12 +19,12 @@ def _get_headers() -> dict[str, str]:
     return headers
 
 
-def _calculate_days_since_push(pushed_at: Optional[datetime]) -> Optional[int]:
+def _calculate_days_since_push(pushed_at: datetime | None) -> int | None:
     if not pushed_at:
         return None
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if pushed_at.tzinfo is None:
-        pushed_at = pushed_at.replace(tzinfo=timezone.utc)
+        pushed_at = pushed_at.replace(tzinfo=UTC)
     return (now - pushed_at).days
 
 
@@ -64,6 +63,7 @@ async def enrich_single_repo(
 
     return EnrichedRepo(
         rank=repo.rank,
+        github_id=data.get("id"),
         owner=repo.owner,
         name=repo.name,
         full_name=repo.full_name,
