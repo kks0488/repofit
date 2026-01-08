@@ -172,6 +172,7 @@ score = 0.5 × embedding_similarity
 |-----------|------------|
 | CLI | Python, Typer, Rich |
 | AI | Google Gemini (analysis + embeddings) |
+| AI SDK | google-genai |
 | Database | Supabase (PostgreSQL + pgvector) |
 | Frontend | Next.js 16, React 19, Tailwind CSS 4, React Query |
 | HTTP | httpx (async) |
@@ -196,6 +197,11 @@ SLACK_NOTIFY_THRESHOLD=0.7
 NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
+
+## Troubleshooting
+
+- **Schema missing**: if you see schema errors or empty UI, run `schema.sql` in Supabase SQL Editor.
+- **No recommendations**: make sure `GEMINI_API_KEY` is set, then run `gt quickstart` or `gt match`.
 
 ## Daily Automation
 
