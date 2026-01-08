@@ -55,12 +55,16 @@ export default function RecommendationCard({ rec }: { rec: Recommendation }) {
         <div className="flex-1 bg-white/5 rounded-xl p-4 border border-white/5">
           <h4 className="text-sm font-semibold text-zinc-300 mb-3 uppercase tracking-wider">Why it's a match</h4>
           <ul className="space-y-2">
-            {reasons.map((reason, idx) => (
-              <li key={idx} className="flex items-start gap-2 text-sm text-zinc-400">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
-                <span>{reason}</span>
-              </li>
-            ))}
+            {reasons.length > 0 ? (
+              reasons.map((reason, idx) => (
+                <li key={idx} className="flex items-start gap-2 text-sm text-zinc-400">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                  <span>{reason}</span>
+                </li>
+              ))
+            ) : (
+              <li className="text-sm text-zinc-500">No reasons available yet.</li>
+            )}
           </ul>
         </div>
       </div>
