@@ -1,5 +1,6 @@
-import google.generativeai as genai
 from typing import Optional
+
+from google import genai
 
 from src.config import get_settings
 
@@ -10,15 +11,17 @@ EMBEDDING_DIM = 768
 class GeminiEmbedder:
     def __init__(self) -> None:
         settings = get_settings()
-        genai.configure(api_key=settings.gemini_api_key)
+        self._client = genai.Client(api_key=settings.gemini_api_key)
 
     def embed(self, text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list[float]:
-        result = genai.embed_content(
+        result = self._client.models.embed_content(
             model=EMBEDDING_MODEL,
-            content=text,
-            task_type=task_type,
+            contents=text,
+            config={"task_type": task_type},
         )
-        return result["embedding"]
+        if not result.embeddings:
+            return []
+        return result.embeddings[0].values or []
 
     def embed_batch(self, texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT") -> list[list[float]]:
         embeddings = []

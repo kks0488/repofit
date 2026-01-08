@@ -1,8 +1,9 @@
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Optional
 
-import google.generativeai as genai
+from google import genai
 
 from src.config import get_settings
 from src.models import AnalyzedRepo, EnrichedRepo
@@ -36,9 +37,15 @@ Provide your analysis in the following JSON format:
 Be concise and practical. Focus on actionable insights for developers."""
 
 
-def _configure_genai() -> None:
-    settings = get_settings()
-    genai.configure(api_key=settings.gemini_api_key)
+_genai_client: Optional[genai.Client] = None
+
+
+def _get_genai_client() -> genai.Client:
+    global _genai_client
+    if _genai_client is None:
+        settings = get_settings()
+        _genai_client = genai.Client(api_key=settings.gemini_api_key)
+    return _genai_client
 
 
 def _calculate_basic_scores(repo: EnrichedRepo) -> dict[str, int]:
@@ -78,7 +85,8 @@ def _calculate_basic_scores(repo: EnrichedRepo) -> dict[str, int]:
 
 
 async def analyze_single_repo(
-    model: genai.GenerativeModel,
+    client: genai.Client,
+    model_name: str,
     repo: EnrichedRepo,
 ) -> AnalyzedRepo:
     prompt = ANALYSIS_PROMPT.format(
@@ -99,8 +107,12 @@ async def analyze_single_repo(
     now = datetime.now(timezone.utc)
 
     try:
-        response = await model.generate_content_async(prompt)
-        text = response.text.strip()
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model=model_name,
+            contents=prompt,
+        )
+        text = (response.text or "").strip()
 
         if text.startswith("```json"):
             text = text[7:]
@@ -230,20 +242,17 @@ async def analyze_repos(
     skip_ai: bool = False,
     batch_size: int = 5,
 ) -> list[AnalyzedRepo]:
-    import asyncio
-
     if skip_ai:
         return [_enriched_to_analyzed(repo, _calculate_basic_scores(repo)) for repo in repos]
 
-    _configure_genai()
     settings = get_settings()
-    model = genai.GenerativeModel(settings.gemini_model)
+    client = _get_genai_client()
 
     analyzed: list[AnalyzedRepo] = []
 
     for i in range(0, len(repos), batch_size):
         batch = repos[i : i + batch_size]
-        tasks = [analyze_single_repo(model, repo) for repo in batch]
+        tasks = [analyze_single_repo(client, settings.gemini_model, repo) for repo in batch]
         results = await asyncio.gather(*tasks)
         analyzed.extend(results)
         if i + batch_size < len(repos):
