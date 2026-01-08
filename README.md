@@ -212,6 +212,19 @@ Set up a cron job or GitHub Action to run daily:
 0 9 * * * cd /path/to/repofit && .venv/bin/gt sync --lang python
 ```
 
+### GitHub Actions (Daily Slack)
+
+Use the bundled workflow at `.github/workflows/daily-sync.yml` and add these secrets:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_KEY`
+- `GEMINI_API_KEY`
+- `SLACK_BOT_TOKEN`
+- `SLACK_CHANNEL_ID`
+
+The workflow runs `gt sync --notify` once per day (09:00 KST).
+
 ## Slack Notifications
 
 Get notified in Slack when high-scoring recommendations are found.
