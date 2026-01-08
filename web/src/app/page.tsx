@@ -28,7 +28,7 @@ export default function Home() {
         <div className="absolute top-0 left-0 w-64 h-64 bg-purple-500/20 blur-[100px] -z-10 rounded-full" />
         
         <h1 className="text-5xl md:text-7xl font-bold tracking-tight mb-6">
-          Discover what's <br />
+          Discover what&apos;s <br />
           <span className="text-gradient">building the future.</span>
         </h1>
         <p className="text-xl text-zinc-400 max-w-2xl leading-relaxed">

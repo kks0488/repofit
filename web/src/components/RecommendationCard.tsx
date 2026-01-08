@@ -53,7 +53,7 @@ export default function RecommendationCard({ rec }: { rec: Recommendation }) {
 
         {/* Right: Reasons */}
         <div className="flex-1 bg-white/5 rounded-xl p-4 border border-white/5">
-          <h4 className="text-sm font-semibold text-zinc-300 mb-3 uppercase tracking-wider">Why it's a match</h4>
+          <h4 className="text-sm font-semibold text-zinc-300 mb-3 uppercase tracking-wider">Why it&apos;s a match</h4>
           <ul className="space-y-2">
             {reasons.length > 0 ? (
               reasons.map((reason, idx) => (

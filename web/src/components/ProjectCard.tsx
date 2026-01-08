@@ -2,7 +2,7 @@
 'use client'
 
 import { Project } from '@/types'
-import { Calendar, Code2, Rocket } from 'lucide-react'
+import { Code2, Rocket } from 'lucide-react'
 
 export default function ProjectCard({ project }: { project: Project }) {
   return (

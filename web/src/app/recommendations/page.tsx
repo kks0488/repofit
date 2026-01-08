@@ -31,7 +31,7 @@ export default function RecommendationsPage() {
             AI Recommendations
           </h1>
           <p className="text-zinc-400 mt-1">
-            Repositories matching your registered projects' tech stacks and goals.
+            Repositories matching your registered projects&apos; tech stacks and goals.
           </p>
         </div>
         
@@ -58,7 +58,7 @@ export default function RecommendationsPage() {
         <div className="text-center py-20 bg-white/5 rounded-2xl border border-white/5 border-dashed">
           <h3 className="text-xl font-semibold text-zinc-300 mb-2">No recommendations yet</h3>
           <p className="text-zinc-500 max-w-md mx-auto mb-6">
-            We need to know what you're building to give you smart suggestions.
+            We need to know what you&apos;re building to give you smart suggestions.
           </p>
           <Link
             href="/projects/new"

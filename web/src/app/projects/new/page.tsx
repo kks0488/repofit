@@ -68,7 +68,7 @@ export default function NewProjectPage() {
       <div className="mb-10">
         <h1 className="text-4xl font-bold mb-3">Register Project</h1>
         <p className="text-zinc-400">
-          Tell us about what you're building. Our AI will analyze your stack and goals to recommend relevant trending repositories.
+          Tell us about what you&apos;re building. Our AI will analyze your stack and goals to recommend relevant trending repositories.
         </p>
       </div>
 
@@ -146,7 +146,7 @@ export default function NewProjectPage() {
               value={formData.goals}
               onChange={handleChange}
               className="w-full bg-zinc-900/50 border border-zinc-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 transition-all placeholder:text-zinc-700"
-              placeholder="What are you trying to achieve? e.g. 'Build a fast dashboard for financial data'"
+              placeholder="What are you trying to achieve? e.g. &apos;Build a fast dashboard for financial data&apos;"
             />
           </div>
 

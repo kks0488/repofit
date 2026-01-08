@@ -50,7 +50,7 @@ export default function TrendingCard({ repo, index }: { repo: TrendingRepo; inde
       {/* AI Summary if available */}
       {repo.summary && (
         <div className="mb-4 bg-white/5 p-3 rounded-lg border border-white/5">
-          <p className="text-xs text-zinc-300 italic">"{repo.summary}"</p>
+          <p className="text-xs text-zinc-300 italic">&ldquo;{repo.summary}&rdquo;</p>
         </div>
       )}
 
