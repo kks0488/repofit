@@ -58,7 +58,8 @@ export default function RecommendationsPage() {
         <div className="text-center py-20 bg-white/5 rounded-2xl border border-white/5 border-dashed">
           <h3 className="text-xl font-semibold text-zinc-300 mb-2">No recommendations yet</h3>
           <p className="text-zinc-500 max-w-md mx-auto mb-6">
-            We need to know what you&apos;re building to give you smart suggestions.
+            Add a project, then run <span className="font-mono text-zinc-300">gt match</span> or{' '}
+            <span className="font-mono text-zinc-300">gt quickstart</span> to generate matches.
           </p>
           <Link
             href="/projects/new"

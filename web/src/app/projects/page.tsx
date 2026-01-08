@@ -56,6 +56,7 @@ export default function ProjectsPage() {
           <h3 className="text-xl font-semibold text-zinc-300 mb-2">No projects yet</h3>
           <p className="text-zinc-500 max-w-sm mb-8">
             Register your project to get personalized AI recommendations for tools and libraries.
+            Or use <span className="font-mono text-zinc-300">gt project-add</span> from the CLI.
           </p>
           <Link
             href="/projects/new"

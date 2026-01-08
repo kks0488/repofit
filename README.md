@@ -55,7 +55,28 @@ AI-powered GitHub Trending analyzer that learns your projects and recommends rep
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Quick Start
+## 5-Minute Quickstart
+
+1. Copy `.env` and fill in Supabase + Gemini keys (Gemini is required for recommendations).
+2. Run `gt init` to generate `web/.env.local` (it will warn if the schema is missing).
+3. Run `schema.sql` once in Supabase SQL Editor.
+4. Run `gt quickstart` to seed trending data (and recommendations if Gemini is set).
+5. Start the web app.
+
+```bash
+cp .env.example .env
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
+
+gt init
+gt quickstart
+
+cd web
+npm install
+npm run dev
+```
+
+## Full Setup
 
 ### 1. Environment
 
@@ -78,11 +99,11 @@ cd ~/projects/repofit
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
 
-# Check configuration
-gt setup
+# Initialize env files
+gt init
 
-# Fetch trending and save
-gt trending --save --analyze
+# Seed data quickly (uses AI if GEMINI_API_KEY is set)
+gt quickstart
 
 # Register your project
 gt project-add --name "My App" --stack "python,fastapi,react" --tags "web,api"
@@ -107,7 +128,9 @@ npm run dev
 
 | Command | Description |
 |---------|-------------|
+| `gt init` | Create env files and validate Supabase schema |
 | `gt setup` | Validate configuration and show setup hints |
+| `gt quickstart` | Seed trending data and recommendations quickly |
 | `gt trending` | View trending repos |
 | `gt trending --analyze` | With AI analysis |
 | `gt trending --save` | Save to database |

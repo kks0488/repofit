@@ -1,4 +1,6 @@
 import asyncio
+import os
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -10,6 +12,24 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 console = Console()
+
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.exists():
+        return values
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
+def _write_env_file(path: Path, values: dict[str, str]) -> None:
+    lines = [f"{key}={value}" for key, value in values.items()]
+    path.write_text("\n".join(lines) + "\n")
 
 
 @app.command()
@@ -210,6 +230,135 @@ def setup() -> None:
     console.print("\n[bold]Database Setup[/bold]")
     console.print("Run the following SQL in your Supabase SQL Editor:")
     console.print("[dim]See: schema.sql in the project root[/dim]")
+
+
+@app.command()
+def init(
+    force: bool = typer.Option(False, "--force", help="Overwrite generated env files"),
+) -> None:
+    """Initialize env files and validate Supabase schema."""
+    root = Path(__file__).resolve().parent.parent
+    env_path = root / ".env"
+    env_example_path = root / ".env.example"
+    web_env_path = root / "web" / ".env.local"
+
+    if not env_path.exists():
+        if env_example_path.exists():
+            env_path.write_text(env_example_path.read_text())
+            console.print("[yellow]Created .env from .env.example. Update it with your keys.[/yellow]")
+        else:
+            console.print("[red].env.example not found.[/red]")
+            raise typer.Exit(1)
+    else:
+        console.print("[green].env already exists[/green]")
+
+    env_values = _read_env_file(env_path)
+    supabase_url = env_values.get("SUPABASE_URL") or os.getenv("SUPABASE_URL", "")
+    supabase_anon = env_values.get("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_ANON_KEY", "")
+
+    if web_env_path.exists() and not force:
+        console.print("[green]web/.env.local already exists[/green]")
+    elif supabase_url and supabase_anon:
+        web_env_path.parent.mkdir(parents=True, exist_ok=True)
+        _write_env_file(
+            web_env_path,
+            {
+                "NEXT_PUBLIC_SUPABASE_URL": supabase_url,
+                "NEXT_PUBLIC_SUPABASE_ANON_KEY": supabase_anon,
+            },
+        )
+        console.print("[green]Created web/.env.local[/green]")
+    else:
+        console.print("[yellow]Skipping web/.env.local (missing SUPABASE_URL or SUPABASE_ANON_KEY).[/yellow]")
+
+    from src.config import get_settings
+    try:
+        _ = get_settings()
+    except Exception:
+        console.print("[yellow]Fill in .env and rerun `gt init` to validate Supabase.[/yellow]")
+        raise typer.Exit(0)
+
+    from src.storage import SupabaseStorage
+    try:
+        storage = SupabaseStorage()
+        storage.get_snapshots(limit=1)
+        console.print("[green]Supabase schema looks ready.[/green]")
+    except Exception:
+        console.print("[yellow]Supabase schema not found. Run schema.sql in Supabase SQL Editor.[/yellow]")
+
+    console.print("Next: run `gt quickstart` to seed data.")
+
+
+@app.command()
+def quickstart(
+    language: Optional[str] = typer.Option(None, "--lang", "-l"),
+    limit: int = typer.Option(25, "--limit", "-n", help="Number of repositories to fetch"),
+    analyze: Optional[bool] = typer.Option(
+        None,
+        "--analyze/--no-analyze",
+        "-a",
+        help="Run AI analysis when GEMINI_API_KEY is set",
+    ),
+) -> None:
+    """Seed trending data and optionally generate recommendations."""
+    from src.config import get_settings
+    from src.collector import fetch_trending
+    from src.enricher import enrich_repos
+    from src.analyzer import analyze_repos
+    from src.storage import SupabaseStorage
+    from src.matcher import Recommender
+
+    try:
+        settings = get_settings()
+    except Exception as exc:
+        console.print(f"[red]Configuration error: {exc}[/red]")
+        raise typer.Exit(1)
+
+    storage = SupabaseStorage()
+    try:
+        storage.get_snapshots(limit=1)
+    except Exception:
+        console.print("[yellow]Supabase schema not found. Run schema.sql in Supabase SQL Editor.[/yellow]")
+        raise typer.Exit(1)
+
+    if analyze is None:
+        use_ai = bool(settings.gemini_api_key)
+    elif analyze and not settings.gemini_api_key:
+        console.print("[yellow]GEMINI_API_KEY not set. Running without AI analysis.[/yellow]")
+        use_ai = False
+    else:
+        use_ai = bool(analyze)
+
+    async def run() -> None:
+        with console.status("[bold green]Fetching trending..."):
+            repos = await fetch_trending(language=language, since="daily")
+
+        if not repos:
+            console.print("[red]No trending repositories found.[/red]")
+            raise typer.Exit(1)
+
+        repos = repos[:limit]
+        with console.status("[bold blue]Enriching..."):
+            enriched = await enrich_repos(repos)
+
+        with console.status("[bold yellow]Analyzing..."):
+            analyzed = await analyze_repos(enriched, skip_ai=not use_ai)
+
+        with console.status("[bold magenta]Saving to database..."):
+            snapshot_id = storage.save_snapshot(analyzed, language=language)
+            console.print(f"[green]Saved snapshot: {snapshot_id}[/green]")
+
+        if settings.gemini_api_key:
+            with console.status("[bold cyan]Running matching pipeline..."):
+                recommender = Recommender()
+                result = recommender.run_full_pipeline()
+                console.print(f"[green]Generated {result['total_recommendations']} recommendations[/green]")
+        else:
+            console.print("[yellow]GEMINI_API_KEY not set. Skipping recommendations.[/yellow]")
+
+        console.print("Next steps: `gt recommendations` or `cd web && npm run dev`")
+
+    asyncio.run(run())
 
 
 # ==================== PROJECT MANAGEMENT ====================
