@@ -381,10 +381,10 @@ class SupabaseStorage:
         return result.data[0] if result.data else None
 
     def upsert_project(self, project_data: dict) -> dict:
-        """Upsert a project (for github-sync and folder-scan)."""
+        """Insert a project (for github-sync and folder-scan)."""
         return (
             self._client.table("gt_my_projects")
-            .upsert(project_data, on_conflict="name")
+            .insert(project_data)
             .execute()
             .data[0]
         )

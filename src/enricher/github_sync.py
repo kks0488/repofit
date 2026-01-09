@@ -216,11 +216,8 @@ def sync_github_repos(
         project_data = {
             "name": name,
             "description": repo.get("description") or f"GitHub: {full_name}",
-            "github_url": repo.get("html_url"),
             "tech_stack": extract_tech_stack(repo),
             "tags": extract_tags(repo),
-            "goals": ["open-source sync"],
-            "source": "github-sync",
         }
 
         storage.upsert_project(project_data)

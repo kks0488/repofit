@@ -307,8 +307,6 @@ class FolderScanner:
                 "description": project.get("description", ""),
                 "tech_stack": project.get("tech_stack", []),
                 "tags": project.get("tags", []),
-                "goals": ["local-scan"],
-                "source": "folder-scan",
             }
 
             storage.upsert_project(project_data)
