@@ -18,6 +18,11 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pydantic>=2.10.0",
     "pydantic-settings>=2.7.0",
+    # RAG & Slack Bot
+    "langchain>=0.3.0",
+    "langchain-google-genai>=2.0.0",
+    "slack-bolt>=1.20.0",
+    "tomli>=2.0.0;python_version<'3.11'",
 ]
 
 [project.optional-dependencies]

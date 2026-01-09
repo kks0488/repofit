@@ -700,5 +700,108 @@ def sync(
     asyncio.run(run())
 
 
+# ==================== AUTO-DISCOVERY ====================
+
+@app.command(name="github-sync")
+def github_sync(
+    starred: bool = typer.Option(False, "--starred", help="Also show starred repos"),
+    private: bool = typer.Option(True, "--private/--public", help="Include private repos"),
+) -> None:
+    """Sync your GitHub repos as projects."""
+    from rich.table import Table
+
+    from src.config import get_settings
+    from src.enricher.github_sync import sync_github_repos
+
+    settings = get_settings()
+    if not settings.github_token:
+        console.print("[red]GITHUB_TOKEN not set. Add it to .env[/red]")
+        raise typer.Exit(1)
+
+    with console.status("[bold green]Syncing GitHub repos..."):
+        result = sync_github_repos(
+            include_starred=starred,
+            include_private=private,
+        )
+
+    console.print(f"[green]Logged in as: {result['user']}[/green]")
+    console.print(f"[green]Found {len(result['repos'])} repos[/green]")
+    console.print(f"[cyan]Created {result['created']} new projects[/cyan]")
+    console.print(f"[dim]Skipped {result['skipped']} existing[/dim]")
+
+    if result.get("starred"):
+        console.print(f"[yellow]Starred repos: {len(result['starred'])}[/yellow]")
+
+    # Show created projects
+    if result["created"] > 0:
+        table = Table(title="New Projects from GitHub")
+        table.add_column("Name", style="cyan")
+        table.add_column("Tech Stack", style="yellow")
+        table.add_column("Stars", justify="right")
+
+        for repo in result["repos"][:10]:
+            from src.enricher.github_sync import extract_tech_stack
+            stack = extract_tech_stack(repo)
+            table.add_row(
+                repo.get("name", ""),
+                ", ".join(stack[:3]),
+                str(repo.get("stargazers_count", 0)),
+            )
+
+        console.print(table)
+
+    console.print("\nNext: run [cyan]gt match[/cyan] to find matching repos.")
+
+
+@app.command(name="scan-projects")
+def scan_projects(
+    path: str = typer.Argument("~/projects", help="Path to scan"),
+    auto_match: bool = typer.Option(True, "--match/--no-match", help="Auto-run matching after scan"),
+) -> None:
+    """Scan local folder for projects and auto-register."""
+    from rich.table import Table
+
+    from src.scanner import scan_projects_folder
+
+    with console.status(f"[bold green]Scanning {path}..."):
+        result = scan_projects_folder(path, auto_sync=True)
+
+    console.print(f"[green]Scanned: {result['path']}[/green]")
+    console.print(f"[green]Found {result['count']} projects[/green]")
+    console.print(f"[cyan]Created {result.get('created', 0)} new projects[/cyan]")
+    console.print(f"[dim]Skipped {result.get('skipped', 0)} existing[/dim]")
+
+    if result.get("recommendations"):
+        console.print(f"[yellow]Generated {result['recommendations']} recommendations[/yellow]")
+
+    # Show detected projects
+    if result["projects"]:
+        table = Table(title="Detected Projects")
+        table.add_column("Name", style="cyan")
+        table.add_column("Tech Stack", style="yellow")
+        table.add_column("Description", style="dim", max_width=40)
+
+        for proj in result["projects"][:15]:
+            table.add_row(
+                proj.get("name", ""),
+                ", ".join(proj.get("tech_stack", [])[:4]),
+                (proj.get("description") or "")[:40],
+            )
+
+        console.print(table)
+
+    console.print("\nView recommendations: [cyan]gt recommendations[/cyan]")
+
+
+@app.command()
+def bot(
+    projects_path: str = typer.Option("~/projects", "--path", "-p", help="Projects folder to scan"),
+) -> None:
+    """Start Slack auto-reply bot (Socket Mode)."""
+    from src.notifier.bot import run_bot
+
+    run_bot(projects_path=projects_path)
+
+
 if __name__ == "__main__":
     app()

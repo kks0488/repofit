@@ -22,6 +22,7 @@ class Settings(BaseSettings):
 
     # Slack Bot
     slack_bot_token: str = ""
+    slack_app_token: str = ""  # Socket Mode (xapp-...)
     slack_channel_id: str = ""
     slack_notify_threshold: float = 0.7
 

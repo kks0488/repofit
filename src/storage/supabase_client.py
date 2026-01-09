@@ -366,3 +366,47 @@ class SupabaseStorage:
             .execute()
             .data
         )
+
+    # ==================== AUTO-DISCOVERY SUPPORT ====================
+
+    def get_project_by_name(self, name: str) -> dict | None:
+        """Get project by name."""
+        result = (
+            self._client.table("gt_my_projects")
+            .select("*")
+            .eq("name", name)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+
+    def upsert_project(self, project_data: dict) -> dict:
+        """Upsert a project (for github-sync and folder-scan)."""
+        return (
+            self._client.table("gt_my_projects")
+            .upsert(project_data, on_conflict="name")
+            .execute()
+            .data[0]
+        )
+
+    def get_repository_by_name(self, full_name: str) -> dict | None:
+        """Get repository by full_name (owner/repo)."""
+        result = (
+            self._client.table("gt_repositories")
+            .select("*")
+            .eq("full_name", full_name)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+
+    def search_similar_repos(self, embedding: list[float], limit: int = 5) -> list[dict]:
+        """Search for similar repos using vector similarity."""
+        try:
+            return self._client.rpc(
+                "gt_search_similar_repos",
+                {"query_embedding": embedding, "match_count": limit}
+            ).execute().data
+        except Exception:
+            # Fallback: return latest trending if RPC fails
+            return self.get_latest_trending(limit=limit)

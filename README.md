@@ -1,9 +1,10 @@
 # RepoFit
 
-AI-powered GitHub Trending analyzer that learns your projects and recommends repos that fit your stack.
+AI-powered GitHub Trending analyzer that learns your projects, recommends repos that fit your stack, and generates monetization ideas.
 
 ## Features
 
+### Core Features
 - **Trending Scraper**: GitHub Trending (daily/weekly/monthly) with language filters
 - **GitHub Enrichment**: Topics, issues, license, and activity via GitHub API
 - **AI Scoring & Summaries**: Gemini analysis with heuristic fallback when AI is disabled
@@ -11,14 +12,18 @@ AI-powered GitHub Trending analyzer that learns your projects and recommends rep
 - **Smart Matching**: Two-stage matcher (pgvector similarity + stack overlap + quality)
 - **GitHub Search Discovery**: Find repos beyond trending using project-based queries
 - **Snapshots & History**: Save runs and track trending history over time
-- **Slack Alerts (Optional)**: Notify on high-score matches
-- **Web Dashboard**: Next.js UI for Trending, Projects, and Recommendations
 
-## Recent Updates
+### Project Auto-Discovery (New!)
+- **GitHub Sync**: Sync your GitHub repos as projects automatically (`gt github-sync`)
+- **Folder Scanner**: Scan local projects folder for auto-registration (`gt scan-projects`)
+- **Stack Detection**: Auto-detect tech stack from package.json, pyproject.toml, README.md
 
-- Added GitHub Search discovery with `gt discover` to find and save repos beyond Trending.
-- Matching now runs against stored repositories (trending + discovered), not only the latest snapshot.
-- Daily Slack runs send a trending summary when no recommendations pass the threshold.
+### Notifications & Slack Bot
+- **Slack Integration**: Rich Korean notifications for all features
+- **Daily Digest**: Trending + project matching summary
+- **Project Matches**: "This trending repo fits your project X"
+- **RAG-powered Bot**: AI answers using stored repo data (langchain + Gemini)
+- **Slack Commands**: `스캔`, `추천`, `트렌딩` in channel → results as new message
 
 ## Architecture
 
@@ -42,7 +47,7 @@ AI-powered GitHub Trending analyzer that learns your projects and recommends rep
 │    │                     │                     │            │
 │    │              ┌──────────────┐             │            │
 │    │              │   Matcher    │             │            │
-│    │              │ (2-stage)    │             │            │
+│    │              │  (2-stage)   │             │            │
 │    │              └──────────────┘             │            │
 │    └─────────────────────┼─────────────────────┘            │
 │                          │                                   │
@@ -54,84 +59,37 @@ AI-powered GitHub Trending analyzer that learns your projects and recommends rep
 │    │  └─────────┘ └─────────┘ └───────────┘  │              │
 │    └─────────────────────────────────────────┘              │
 │                          │                                   │
-│                          ▼                                   │
-│    ┌─────────────────────────────────────────┐              │
-│    │         Next.js Frontend (web/)          │   Frontend  │
-│    │  Dashboard │ Projects │ Recommendations  │              │
-│    └─────────────────────────────────────────┘              │
+│              ┌───────────┴───────────┐                      │
+│              ▼                       ▼                      │
+│    ┌─────────────────┐    ┌─────────────────┐              │
+│    │  Next.js Web UI │    │  Slack Notifier │              │
+│    └─────────────────┘    └─────────────────┘              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ## 5-Minute Quickstart
 
-1. Copy `.env` and fill in Supabase + Gemini keys (Gemini is required for recommendations).
-2. Run `gt init` to generate `web/.env.local` (it will warn if the schema is missing).
-3. Run `schema.sql` once in Supabase SQL Editor.
-4. Run `gt quickstart` to seed trending data (and recommendations if Gemini is set).
-5. Start the web app.
-
 ```bash
 cp .env.example .env
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
 
 gt init
-gt quickstart
-
-cd web
-npm install
-npm run dev
-```
-
-## Full Setup
-
-### 1. Environment
-
-Create a `.env` from the template:
-
-```bash
-cp .env.example .env
-```
-
-### 2. Database Setup
-
-Run `schema.sql` in your Supabase SQL Editor to create tables with `gt_` prefix.
-The default schema enables anonymous inserts for `gt_my_projects` and `gt_bookmarks` to keep the web UI frictionless for personal use.
-For shared deployments, tighten RLS and move writes behind authenticated or server-side endpoints.
-
-### 3. Backend (CLI)
-
-```bash
-cd ~/projects/repofit
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
-
-# Initialize env files
-gt init
-
-# Seed data quickly (uses AI if GEMINI_API_KEY is set)
 gt quickstart
 
 # Register your project
-gt project-add --name "My App" --stack "python,fastapi,react" --tags "web,api"
+gt project-add --name "MyApp" --stack "python,fastapi" --tags "api,web"
 
-# Get smart recommendations
-gt match
+# Or sync from GitHub
+gt github-sync
 
-# Full sync (fetch + analyze + match)
-gt sync
-```
-
-### 4. Frontend (Web UI)
-
-```bash
-cd web
-npm install
-npm run dev
-# Open http://localhost:3003
+# Get daily recommendations
+gt sync --notify
 ```
 
 ## CLI Commands
+
+### Core Commands
 
 | Command | Description |
 |---------|-------------|
@@ -140,24 +98,35 @@ npm run dev
 | `gt quickstart` | Seed trending data and recommendations quickly |
 | `gt trending` | View trending repos |
 | `gt trending --analyze` | With AI analysis |
-| `gt trending --save` | Save to database |
 | `gt inspect owner/repo` | Detailed repo analysis |
 | `gt history owner/repo` | Trending history for a repo |
 | `gt snapshots` | List saved trending snapshots |
+
+### Project Management
+
+| Command | Description |
+|---------|-------------|
 | `gt projects` | List your projects |
 | `gt project-add` | Register a project |
-| `gt match` | Find matching repos |
+| `gt github-sync` | Sync your GitHub repos as projects |
+| `gt github-sync --starred` | Also show starred repos |
+| `gt scan-projects ~/projects` | Scan local folder for projects |
+| `gt match` | Find matching repos for all projects |
 | `gt match --project <id>` | Match a single project |
 | `gt recommendations` | View AI recommendations |
 | `gt discover` | Discover GitHub repos that fit your projects |
+
+### Automation
+
+| Command | Description |
+|---------|-------------|
 | `gt sync` | Full pipeline (fetch → analyze → save → match) |
-| `gt match --notify` | Match and send Slack notification |
-| `gt sync --notify` | Full pipeline with Slack notification |
+| `gt sync --notify` | Full pipeline with daily digest to Slack |
+| `gt bot` | Start Slack auto-reply bot (requires Socket Mode) |
 
 ## Smart Matching
 
-The recommendation engine uses a 2-stage approach across all stored repositories
-(trending + discovered):
+The recommendation engine uses a 2-stage approach across all stored repositories:
 
 1. **Stage 1 - Fast Filter**:
    - Tech stack overlap (languages, frameworks)
@@ -170,33 +139,78 @@ The recommendation engine uses a 2-stage approach across all stored repositories
 
 **Scoring Formula**:
 ```
-score = 0.5 × embedding_similarity 
-      + 0.3 × stack_overlap 
+score = 0.5 × embedding_similarity
+      + 0.3 × stack_overlap
       + 0.2 × quality_score
 ```
 
-## Discovery (GitHub Search)
+## Slack Notifications
 
-Use `gt discover` to find repos that match your project tags/stack and save them for matching.
+### Setup
+
+1. **Create Slack App with Bot Token:**
+   - Go to [Slack API](https://api.slack.com/apps) → Create New App
+   - Add Bot Token Scopes: `chat:write`, `channels:read`, `channels:history`
+   - Install to Workspace → Copy Bot Token (`xoxb-...`)
+   - Invite bot to your channel: `/invite @YourBot`
+
+2. **Enable Socket Mode (for auto-reply bot):**
+   - Slack App Settings → Socket Mode → Enable
+   - Create App-Level Token with `connections:write` scope
+   - Copy the token (`xapp-...`)
+   - Event Subscriptions → Enable Events
+   - Subscribe to bot events: `message.channels`, `app_mention`
+
+3. **Configure environment:**
+   ```bash
+   SLACK_BOT_TOKEN=xoxb-your-bot-token
+   SLACK_APP_TOKEN=xapp-your-app-token  # Socket Mode용
+   SLACK_CHANNEL_ID=C0A1CVD5153
+   SLACK_NOTIFY_THRESHOLD=0.7
+   ```
+
+### Slack Bot (RAG-powered)
+
+RepoFit 봇은 langchain + Gemini + pgvector를 사용하여 저장된 레포 데이터를 검색하고 더 정확한 답변을 제공합니다.
 
 ```bash
-# Discover based on a registered project
-gt discover --project <id> --min-stars 50
-
-# Or run a custom GitHub search query
-gt discover --query "topic:fastapi stars:>=100"
+gt bot  # 봇 시작 (백그라운드로 실행 권장)
 ```
 
-## Tech Stack
+**채널 명령어 (새 메시지로 결과 전송):**
 
-| Component | Technology |
-|-----------|------------|
-| CLI | Python, Typer, Rich |
-| AI | Google Gemini (analysis + embeddings) |
-| AI SDK | google-genai |
-| Database | Supabase (PostgreSQL + pgvector) |
-| Frontend | Next.js 16, React 19, Tailwind CSS 4, React Query |
-| HTTP | httpx (async) |
+| 채널/스레드에 입력 | 동작 |
+|------------------|------|
+| `스캔` / `scan` | 프로젝트 폴더 스캔 → 등록 → 매칭 |
+| `추천` / `recommend` | 추천 결과 → 채널에 새 메시지 |
+| `트렌딩` / `trending` | 트렌딩 TOP 10 → 채널에 새 메시지 |
+| `매칭` / `match` | 매칭 실행 → 결과 채널에 |
+
+**일반 질문 (RAG 응답):**
+```
+[Slack 스레드]
+├─ 🤖 RepoFit: 📊 오늘의 다이제스트...
+├─ 👤 나: "fastapi랑 langchain 조합하면 뭐 만들 수 있어?"
+└─ 🤖 RepoFit: (저장된 레포 정보 검색 후 구체적 답변)
+```
+
+### Sample Daily Digest
+
+```
+📊 오늘의 RepoFit 다이제스트
+🌐 Python • 📈 트렌딩 25개 분석
+────────────────────────────
+🎯 프로젝트별 매칭 결과
+  MyApp: 5개 매칭 • 🔥 최고점 92% (owner/repo)
+  Backend: 3개 매칭 • ⭐ 최고점 85% (author/lib)
+────────────────────────────
+🏆 오늘의 TOP 추천
+  🔥 fastapi/fastapi → MyApp 92% 매칭
+  ⭐ langchain/langchain → Backend 85% 매칭
+────────────────────────────
+🚀 다음 단계
+  • gt recommendations - 전체 추천 보기
+```
 
 ## Environment Variables
 
@@ -206,11 +220,12 @@ SUPABASE_URL=your-supabase-url
 SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_KEY=your-service-key
 GEMINI_API_KEY=your-gemini-key
-GEMINI_MODEL=gemini-2.5-flash-preview-05-20
-GITHUB_TOKEN=optional-for-higher-rate-limits
+GEMINI_MODEL=gemini-2.5-flash
+GITHUB_TOKEN=your-github-token  # For github-sync
 
-# Slack Bot (optional)
+# Slack Bot (optional but recommended)
 SLACK_BOT_TOKEN=xoxb-xxx
+SLACK_APP_TOKEN=xapp-xxx  # Socket Mode
 SLACK_CHANNEL_ID=Cxxx
 SLACK_NOTIFY_THRESHOLD=0.7
 
@@ -219,66 +234,45 @@ NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-## Troubleshooting
-
-- **Schema missing**: if you see schema errors or empty UI, run `schema.sql` in Supabase SQL Editor.
-- **No recommendations**: make sure `GEMINI_API_KEY` is set, then run `gt quickstart` or `gt match`.
-
 ## Daily Automation
 
-Set up a cron job or GitHub Action to run daily:
+### Cron Job
 
 ```bash
-# Cron example (every day at 9 AM)
-0 9 * * * cd /path/to/repofit && .venv/bin/gt sync --lang python
+# Every day at 9 AM - full digest
+0 9 * * * cd /path/to/repofit && .venv/bin/gt sync --notify
+
+# Every day at 6 PM - run matching
+0 18 * * * cd /path/to/repofit && .venv/bin/gt match --notify
 ```
 
-### GitHub Actions (Daily Slack)
+### GitHub Actions
 
-Use the bundled workflow at `.github/workflows/daily-sync.yml` and add these secrets:
-
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_KEY`
+Use `.github/workflows/daily-sync.yml` with secrets:
+- `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`
 - `GEMINI_API_KEY`
-- `SLACK_BOT_TOKEN`
-- `SLACK_CHANNEL_ID`
+- `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID`
 
-The workflow runs `gt sync --notify` once per day (09:00 KST).
-If there are no recommendations above the threshold, it sends a daily trending summary instead.
+## Tech Stack
 
-## Slack Notifications
+| Component | Technology |
+|-----------|------------|
+| CLI | Python, Typer, Rich |
+| AI | Google Gemini (analysis + embeddings) |
+| AI SDK | google-genai, langchain, langchain-google-genai |
+| RAG | langchain + pgvector retrieval |
+| Database | Supabase (PostgreSQL + pgvector) |
+| Frontend | Next.js 16, React 19, Tailwind CSS 4 |
+| HTTP | httpx (async) |
+| Notifications | Slack Block Kit, slack-bolt (Socket Mode) |
 
-Get notified in Slack when high-scoring recommendations are found.
+## Troubleshooting
 
-### Setup
-
-1. **Create Slack App with Bot Token:**
-   - Go to [Slack API](https://api.slack.com/apps) → Create New App
-   - Add Bot Token Scopes: `chat:write`, `channels:read`
-   - Install to Workspace → Copy Bot Token (`xoxb-...`)
-   - Invite bot to your channel: `/invite @YourBot`
-
-2. **Configure environment:**
-   ```bash
-   SLACK_BOT_TOKEN=xoxb-your-bot-token
-   SLACK_CHANNEL_ID=C0A1CVD5153
-   SLACK_NOTIFY_THRESHOLD=0.7
-   ```
-
-3. **Run with notifications:**
-   ```bash
-   gt match --notify
-   gt match --notify --score-threshold 0.8
-   gt sync --notify
-   ```
-
-### Notification Content
-
-- Count of recommendations above threshold
-- Top matching repositories with scores and project names
-- First matching reason per repo and GitHub links
-- Shortcut to `gt recommendations` and the local web UI
+- **Schema missing**: Run `schema.sql` in Supabase SQL Editor
+- **No recommendations**: Set `GEMINI_API_KEY`, then run `gt quickstart`
+- **Slack not working**: Check `SLACK_BOT_TOKEN` and `SLACK_CHANNEL_ID`
+- **No project matches**: Register projects with `gt project-add` first
+- **GitHub sync fails**: Check `GITHUB_TOKEN` permissions (repo scope)
 
 ## License
 
