@@ -1,0 +1,7 @@
+[Unit]
+Description=RepoFit daily sync (Slack notify)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/kkaemo/projects/repofit
+ExecStart=/home/kkaemo/projects/repofit/.venv/bin/python -m src.cli sync --notify

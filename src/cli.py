@@ -1,5 +1,7 @@
 import asyncio
 import os
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import typer
@@ -538,12 +540,20 @@ def match(
     min_stars: int = typer.Option(100, "--min-stars", help="Minimum stars filter"),
     limit: int = typer.Option(10, "--limit", "-n"),
     notify: bool = typer.Option(False, "--notify", help="Send Slack notification for high-score matches"),
-    score_threshold: float = typer.Option(0.7, "--score-threshold", help="Minimum score for notification (0.0-1.0)"),
+    score_threshold: float | None = typer.Option(
+        None,
+        "--score-threshold",
+        help="Minimum score for notification (0.0-1.0)",
+    ),
 ) -> None:
     """Find trending repos that match your projects."""
     from rich.table import Table
 
+    from src.config import get_settings
     from src.matcher import Recommender
+
+    settings = get_settings()
+    threshold = score_threshold if score_threshold is not None else settings.slack_notify_threshold
 
     recommender = Recommender()
 
@@ -563,14 +573,14 @@ def match(
             result = recommender.run_full_pipeline(
                 min_stars=min_stars,
                 notify=notify,
-                score_threshold=score_threshold,
+                score_threshold=threshold,
             )
             console.print(f"[green]Embedded {result['repos_embedded']} repos, {result['projects_embedded']} projects[/green]")
             console.print(f"[green]Generated {result['total_recommendations']} recommendations[/green]")
             if notify and result.get("notified_count", 0) > 0:
                 console.print(f"[cyan]Sent Slack notification for {result['notified_count']} high-score matches[/cyan]")
             elif notify:
-                console.print(f"[yellow]No recommendations above threshold ({score_threshold}), no notification sent[/yellow]")
+                console.print(f"[yellow]No recommendations above threshold ({threshold}), no notification sent[/yellow]")
             return
 
     if not recs:
@@ -628,14 +638,21 @@ def recommendations(
     console.print(table)
 
 
-@app.command()
-def sync(
-    language: str | None = typer.Option(None, "--lang", "-l"),
-    analyze: bool = typer.Option(True, "--analyze/--no-analyze", "-a"),
-    notify: bool = typer.Option(False, "--notify", help="Send Slack notification for high-score matches"),
-    score_threshold: float = typer.Option(0.7, "--score-threshold", help="Minimum score for notification (0.0-1.0)"),
+def _next_run_at(hour: int, minute: int) -> datetime:
+    now = datetime.now()
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if target <= now:
+        target += timedelta(days=1)
+    return target
+
+
+async def _run_sync_pipeline(
+    *,
+    language: str | None,
+    analyze: bool,
+    notify: bool,
+    score_threshold: float,
 ) -> None:
-    """Full sync: fetch trending, analyze, save, and match."""
     from src.analyzer import analyze_repos
     from src.collector import fetch_trending
     from src.enricher import enrich_repos
@@ -643,61 +660,147 @@ def sync(
     from src.notifier import SlackNotifier
     from src.storage import SupabaseStorage
 
-    async def run() -> None:
-        with console.status("[bold green]Fetching trending..."):
-            repos = await fetch_trending(language=language, since="daily")
+    with console.status("[bold green]Fetching trending..."):
+        repos = await fetch_trending(language=language, since="daily")
 
-        console.print(f"[green]Found {len(repos)} trending repos[/green]")
+    console.print(f"[green]Found {len(repos)} trending repos[/green]")
 
-        with console.status("[bold blue]Enriching..."):
-            enriched = await enrich_repos(repos)
+    with console.status("[bold blue]Enriching..."):
+        enriched = await enrich_repos(repos)
 
-        with console.status("[bold yellow]Analyzing..."):
-            analyzed = await analyze_repos(enriched, skip_ai=not analyze)
+    with console.status("[bold yellow]Analyzing..."):
+        analyzed = await analyze_repos(enriched, skip_ai=not analyze)
 
-        with console.status("[bold magenta]Saving to database..."):
-            storage = SupabaseStorage()
-            snapshot_id = storage.save_snapshot(analyzed, language=language)
-            console.print(f"[green]Saved snapshot: {snapshot_id}[/green]")
+    with console.status("[bold magenta]Saving to database..."):
+        storage = SupabaseStorage()
+        snapshot_id = storage.save_snapshot(analyzed, language=language)
+        console.print(f"[green]Saved snapshot: {snapshot_id}[/green]")
 
-        trending_summary = {
-            "language": language,
-            "total_repos": len(analyzed),
-            "top_repos": [
-                {
-                    "full_name": repo.full_name,
-                    "stars": repo.stars,
-                    "stars_today": repo.stars_today,
-                    "language": repo.language,
-                }
-                for repo in analyzed[:5]
-            ],
-        }
+    trending_summary = {
+        "language": language,
+        "total_repos": len(analyzed),
+        "top_repos": [
+            {
+                "full_name": repo.full_name,
+                "stars": repo.stars,
+                "stars_today": repo.stars_today,
+                "language": repo.language,
+            }
+            for repo in analyzed[:5]
+        ],
+    }
 
-        with console.status("[bold cyan]Running matching pipeline..."):
-            recommender = Recommender()
-            result = recommender.run_full_pipeline(
-                notify=notify,
-                score_threshold=score_threshold,
-                trending_summary=trending_summary,
-            )
-            console.print(f"[green]Generated {result['total_recommendations']} recommendations[/green]")
-            if notify and result.get("notified_count", 0) > 0:
-                console.print(f"[cyan]Sent Slack notification for {result['notified_count']} high-score matches[/cyan]")
-            elif notify:
-                notifier = SlackNotifier()
-                if notifier.notify_trending_summary(
-                    total_repos=trending_summary["total_repos"],
-                    language=trending_summary["language"],
-                    top_repos=trending_summary["top_repos"],
-                ):
-                    console.print("[cyan]Sent daily Slack summary[/cyan]")
+    with console.status("[bold cyan]Running matching pipeline..."):
+        recommender = Recommender()
+        result = recommender.run_full_pipeline(
+            notify=notify,
+            score_threshold=score_threshold,
+            trending_summary=trending_summary,
+        )
+        console.print(f"[green]Generated {result['total_recommendations']} recommendations[/green]")
+        if notify and result.get("notified_count", 0) > 0:
+            console.print(f"[cyan]Sent Slack notification for {result['notified_count']} high-score matches[/cyan]")
+        elif notify:
+            notifier = SlackNotifier()
+            if notifier.notify_trending_summary(
+                total_repos=trending_summary["total_repos"],
+                language=trending_summary["language"],
+                top_repos=trending_summary["top_repos"],
+            ):
+                console.print("[cyan]Sent daily Slack summary[/cyan]")
 
-        console.print("\n[bold green]:white_check_mark: Sync complete![/bold green]")
-        console.print("View recommendations: [cyan]gt recommendations[/cyan]")
-        console.print("Or visit the web UI: [cyan]http://localhost:3003[/cyan]")
+    console.print("\n[bold green]:white_check_mark: Sync complete![/bold green]")
+    console.print("View recommendations: [cyan]gt recommendations[/cyan]")
+    console.print("Or visit the web UI: [cyan]http://localhost:3003[/cyan]")
 
-    asyncio.run(run())
+
+@app.command()
+def sync(
+    language: str | None = typer.Option(None, "--lang", "-l"),
+    analyze: bool = typer.Option(True, "--analyze/--no-analyze", "-a"),
+    notify: bool = typer.Option(False, "--notify", help="Send Slack notification for high-score matches"),
+    score_threshold: float | None = typer.Option(
+        None,
+        "--score-threshold",
+        help="Minimum score for notification (0.0-1.0)",
+    ),
+) -> None:
+    """Full sync: fetch trending, analyze, save, and match."""
+    from src.config import get_settings
+
+    settings = get_settings()
+    threshold = score_threshold if score_threshold is not None else settings.slack_notify_threshold
+
+    asyncio.run(
+        _run_sync_pipeline(
+            language=language,
+            analyze=analyze,
+            notify=notify,
+            score_threshold=threshold,
+        )
+    )
+
+
+@app.command()
+def schedule(
+    hour: int = typer.Option(19, "--hour", "-H", help="Local hour to run (0-23)"),
+    minute: int = typer.Option(0, "--minute", "-M", help="Local minute to run (0-59)"),
+    language: str | None = typer.Option(None, "--lang", "-l"),
+    analyze: bool = typer.Option(True, "--analyze/--no-analyze", "-a"),
+    notify: bool = typer.Option(True, "--notify/--no-notify", help="Send Slack notification"),
+    score_threshold: float | None = typer.Option(
+        None,
+        "--score-threshold",
+        help="Minimum score for notification (0.0-1.0)",
+    ),
+) -> None:
+    """Run daily sync at a fixed local time."""
+    from src.config import get_settings
+
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        console.print("[red]Invalid time. Use --hour 0-23 and --minute 0-59.[/red]")
+        raise typer.Exit(1)
+
+    settings = get_settings()
+    threshold = score_threshold if score_threshold is not None else settings.slack_notify_threshold
+
+    console.print(
+        f"[green]Scheduler started. Daily sync at {hour:02d}:{minute:02d} (local time).[/green]"
+    )
+    console.print("[dim]Press Ctrl+C to stop.[/dim]")
+
+    try:
+        while True:
+            run_at = _next_run_at(hour, minute)
+            wait_seconds = max(0, (run_at - datetime.now()).total_seconds())
+            console.print(f"[cyan]Next run: {run_at}[/cyan]")
+            time.sleep(wait_seconds)
+            try:
+                asyncio.run(
+                    _run_sync_pipeline(
+                        language=language,
+                        analyze=analyze,
+                        notify=notify,
+                        score_threshold=threshold,
+                    )
+                )
+            except Exception as exc:
+                console.print(f"[red]Scheduled sync failed: {exc}[/red]")
+                if notify:
+                    try:
+                        from src.notifier import SlackNotifier
+
+                        notifier = SlackNotifier()
+                        if notifier.is_configured():
+                            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            error_text = str(exc)[:200] if str(exc) else "unknown error"
+                            notifier.send_message(
+                                text=f"RepoFit daily sync failed at {timestamp}: {error_text}"
+                            )
+                    except Exception as notify_exc:
+                        console.print(f"[red]Slack failure notification failed: {notify_exc}[/red]")
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Scheduler stopped.[/yellow]")
 
 
 # ==================== AUTO-DISCOVERY ====================

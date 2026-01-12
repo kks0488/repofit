@@ -1,4 +1,6 @@
 
+import logging
+
 import httpx
 
 from src.config import get_settings
@@ -17,6 +19,7 @@ class SlackNotifier:
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
         }
+        self._logger = logging.getLogger(__name__)
 
     def is_configured(self) -> bool:
         return bool(self.token) and bool(self.channel_id)
@@ -47,9 +50,16 @@ class SlackNotifier:
                 timeout=10.0,
             )
             data = response.json()
-            return data.get("ok", False)
-        except httpx.RequestError:
+        except httpx.RequestError as exc:
+            self._logger.warning("Slack request failed: %s", exc)
             return False
+        except ValueError:
+            self._logger.warning("Slack response was not JSON (status=%s)", response.status_code)
+            return False
+
+        if not data.get("ok", False):
+            self._logger.warning("Slack postMessage failed: %s", data.get("error", "unknown"))
+        return data.get("ok", False)
 
     def notify_trending_summary(
         self,

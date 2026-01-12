@@ -122,6 +122,7 @@ gt sync --notify
 |---------|-------------|
 | `gt sync` | Full pipeline (fetch → analyze → save → match) |
 | `gt sync --notify` | Full pipeline with daily digest to Slack |
+| `gt schedule` | Run daily sync at a fixed local time (default 19:00) |
 | `gt bot` | Start Slack auto-reply bot (requires Socket Mode) |
 
 ## Smart Matching
@@ -212,6 +213,16 @@ gt bot  # 봇 시작 (백그라운드로 실행 권장)
   • gt recommendations - 전체 추천 보기
 ```
 
+### Daily Notifications
+
+```bash
+# One-off run (send Slack summary + high-score matches)
+gt sync --notify
+
+# Daily schedule at 19:00 local time (keep process running)
+gt schedule --hour 19 --minute 0 --notify
+```
+
 ## Environment Variables
 
 ```bash
@@ -236,11 +247,22 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 
 ## Daily Automation
 
+### systemd (recommended)
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp scripts/repofit-daily.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now repofit-daily.timer
+```
+
+To change the time, edit `~/.config/systemd/user/repofit-daily.timer` and update `OnCalendar=`.
+
 ### Cron Job
 
 ```bash
-# Every day at 9 AM - full digest
-0 9 * * * cd /path/to/repofit && .venv/bin/gt sync --notify
+# Every day at 7 PM - full digest
+0 19 * * * cd /path/to/repofit && .venv/bin/gt sync --notify
 
 # Every day at 6 PM - run matching
 0 18 * * * cd /path/to/repofit && .venv/bin/gt match --notify
