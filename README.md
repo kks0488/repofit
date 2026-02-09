@@ -7,7 +7,7 @@ AI-powered GitHub Trending analyzer that learns your projects, recommends repos 
 ### Core Features
 - **Trending Scraper**: GitHub Trending (daily/weekly/monthly) with language filters
 - **GitHub Enrichment**: Topics, issues, license, and activity via GitHub API
-- **AI Scoring & Summaries**: Gemini analysis with heuristic fallback when AI is disabled
+- **AI Scoring & Summaries**: OpenAI analysis with heuristic fallback when AI is disabled
 - **Project Profiles**: Register projects with stack, tags, and goals
 - **Smart Matching**: Two-stage matcher (pgvector similarity + stack overlap + quality)
 - **GitHub Search Discovery**: Find repos beyond trending using project-based queries
@@ -22,7 +22,7 @@ AI-powered GitHub Trending analyzer that learns your projects, recommends repos 
 - **Slack Integration**: Rich Korean notifications for all features
 - **Daily Digest**: Trending + project matching summary
 - **Project Matches**: "This trending repo fits your project X"
-- **RAG-powered Bot**: AI answers using stored repo data (langchain + Gemini)
+- **RAG-powered Bot**: AI answers using stored repo data (langchain + OpenAI)
 - **Slack Commands**: `스캔`, `추천`, `트렌딩` in channel → results as new message
 
 ## Architecture
@@ -35,14 +35,14 @@ AI-powered GitHub Trending analyzer that learns your projects, recommends repos 
 │    │                     ▼                     │            │
 │    │   ┌──────────┐  ┌──────────┐  ┌────────┐ │            │
 │    │   │Collector │→ │ Enricher │→ │Analyzer│ │  Python    │
-│    │   │(scraper) │  │(GH API)  │  │(Gemini)│ │  Backend   │
+│    │   │(scraper) │  │(GH API)  │  │(OpenAI)│ │  Backend   │
 │    │   └──────────┘  └──────────┘  └────────┘ │            │
 │    │         │              │           │     │            │
 │    │         └──────────────┴───────────┘     │            │
 │    │                     │                     │            │
 │    │              ┌──────────────┐             │            │
 │    │              │   Embedder   │             │            │
-│    │              │  (Gemini)    │             │            │
+│    │              │  (OpenAI)    │             │            │
 │    │              └──────────────┘             │            │
 │    │                     │                     │            │
 │    │              ┌──────────────┐             │            │
@@ -135,7 +135,7 @@ The recommendation engine uses a 2-stage approach across all stored repositories
    - Quality threshold (stars, activity)
 
 2. **Stage 2 - Semantic Rerank**:
-   - Vector similarity using Gemini embeddings
+   - Vector similarity using OpenAI embeddings
    - Cosine distance between project ↔ repo embeddings
 
 **Scoring Formula**:
@@ -172,7 +172,7 @@ score = 0.5 × embedding_similarity
 
 ### Slack Bot (RAG-powered)
 
-RepoFit 봇은 langchain + Gemini + pgvector를 사용하여 저장된 레포 데이터를 검색하고 더 정확한 답변을 제공합니다.
+RepoFit 봇은 langchain + OpenAI + pgvector를 사용하여 저장된 레포 데이터를 검색하고 더 정확한 답변을 제공합니다.
 
 ```bash
 gt bot  # 봇 시작 (백그라운드로 실행 권장)

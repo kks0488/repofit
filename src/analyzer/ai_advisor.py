@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import math
 from datetime import UTC, datetime
 
 from openai import OpenAI
@@ -68,7 +69,7 @@ def _calculate_basic_scores(repo: EnrichedRepo) -> dict[str, int]:
     if repo.archived:
         activity_score = 0
 
-    community_score = min(100, (repo.stars / 100) + (repo.forks * 2))
+    community_score = min(100, math.log10(max(repo.stars, 1)) * 25)
 
     health_score = (activity_score + community_score) // 2
 

@@ -15,53 +15,94 @@ class SupabaseStorage:
             settings.supabase_service_key,
         )
 
+    def _build_repository_row(self, repo: AnalyzedRepo, updated_at: datetime) -> dict:
+        repo_data = {
+            "full_name": repo.full_name,
+            "owner": repo.owner,
+            "name": repo.name,
+            "url": repo.url,
+            "description": repo.description,
+            "language": repo.language,
+            "license": repo.license,
+            "topics": repo.topics,
+            "stars": repo.stars,
+            "forks": repo.forks,
+            "open_issues": repo.open_issues,
+            "updated_at": updated_at.isoformat(),
+        }
+        if repo.github_id is not None:
+            repo_data["github_id"] = repo.github_id
+        if repo.created_at:
+            repo_data["first_seen_at"] = repo.created_at.isoformat()
+        return repo_data
+
+    def _upsert_repository_rows(
+        self,
+        repos: list[AnalyzedRepo],
+        updated_at: datetime,
+    ) -> dict[str, str]:
+        if not repos:
+            return {}
+
+        repository_rows = [self._build_repository_row(repo, updated_at) for repo in repos]
+        upserted = (
+            self._client.table("gt_repositories")
+            .upsert(repository_rows, on_conflict="full_name")
+            .execute()
+            .data
+            or []
+        )
+
+        repo_id_by_full_name = {
+            row["full_name"]: row["id"]
+            for row in upserted
+            if row.get("full_name") and row.get("id")
+        }
+
+        missing_full_names = [repo.full_name for repo in repos if repo.full_name not in repo_id_by_full_name]
+        if missing_full_names:
+            fetched = (
+                self._client.table("gt_repositories")
+                .select("id, full_name")
+                .in_("full_name", missing_full_names)
+                .execute()
+                .data
+            )
+            for row in fetched:
+                if row.get("full_name") and row.get("id"):
+                    repo_id_by_full_name[row["full_name"]] = row["id"]
+
+        return repo_id_by_full_name
+
     def save_snapshot(
         self,
         repos: list[AnalyzedRepo],
         language: str | None = None,
         since: str = "daily",
     ) -> UUID:
+        collected_at = datetime.now(UTC)
         snapshot_result = (
             self._client.table("gt_snapshots")
             .insert({
                 "language": language,
                 "since": since,
                 "repo_count": len(repos),
-                "collected_at": datetime.now(UTC).isoformat(),
+                "collected_at": collected_at.isoformat(),
             })
             .execute()
         )
         snapshot_id = snapshot_result.data[0]["id"]
+        repo_id_by_full_name = self._upsert_repository_rows(repos, collected_at)
+        model_name = get_settings().openai_model
 
+        trending_entries: list[dict] = []
+        analyses: list[dict] = []
         for repo in repos:
-            repo_data = {
-                "full_name": repo.full_name,
-                "owner": repo.owner,
-                "name": repo.name,
-                "url": repo.url,
-                "description": repo.description,
-                "language": repo.language,
-                "license": repo.license,
-                "topics": repo.topics,
-                "stars": repo.stars,
-                "forks": repo.forks,
-                "open_issues": repo.open_issues,
-                "updated_at": datetime.now(UTC).isoformat(),
-            }
-            if repo.github_id is not None:
-                repo_data["github_id"] = repo.github_id
+            repo_id = repo_id_by_full_name.get(repo.full_name)
+            if not repo_id:
+                continue
 
-            if repo.created_at:
-                repo_data["first_seen_at"] = repo.created_at.isoformat()
-
-            repo_result = (
-                self._client.table("gt_repositories")
-                .upsert(repo_data, on_conflict="full_name")
-                .execute()
-            )
-            repo_id = repo_result.data[0]["id"]
-
-            self._client.table("gt_trending_entries").insert({
+            trending_entries.append({
                 "snapshot_id": snapshot_id,
                 "repository_id": repo_id,
                 "rank": repo.rank,
@@ -69,10 +110,10 @@ class SupabaseStorage:
                 "stars_today": repo.stars_today,
                 "forks": repo.forks,
                 "is_active": repo.is_active,
-            }).execute()
+            })
 
             if repo.summary or repo.overall_score > 0:
-                self._client.table("gt_analyses").insert({
+                analyses.append({
                     "repository_id": repo_id,
                     "health_score": repo.health_score,
                     "activity_score": repo.activity_score,
@@ -83,48 +124,30 @@ class SupabaseStorage:
                     "use_cases": repo.use_cases,
                     "integration_tips": repo.integration_tips,
                     "potential_risks": repo.potential_risks,
-                    "model_used": get_settings().openai_model,
+                    "model_used": model_name,
                     "analyzed_at": repo.analyzed_at.isoformat() if repo.analyzed_at else None,
-                }).execute()
+                })
+
+        if trending_entries:
+            self._client.table("gt_trending_entries").insert(trending_entries).execute()
+        if analyses:
+            self._client.table("gt_analyses").insert(analyses).execute()
 
         return UUID(snapshot_id)
 
     def upsert_repositories(self, repos: list[AnalyzedRepo]) -> list[str]:
         now = datetime.now(UTC)
-        repo_ids: list[str] = []
+        repo_id_by_full_name = self._upsert_repository_rows(repos, now)
+        repo_ids = [repo_id_by_full_name[repo.full_name] for repo in repos if repo.full_name in repo_id_by_full_name]
+        model_name = get_settings().openai_model
 
+        analyses = []
         for repo in repos:
-            repo_data = {
-                "full_name": repo.full_name,
-                "owner": repo.owner,
-                "name": repo.name,
-                "url": repo.url,
-                "description": repo.description,
-                "language": repo.language,
-                "license": repo.license,
-                "topics": repo.topics,
-                "stars": repo.stars,
-                "forks": repo.forks,
-                "open_issues": repo.open_issues,
-                "updated_at": now.isoformat(),
-            }
-
-            if repo.github_id is not None:
-                repo_data["github_id"] = repo.github_id
-
-            if repo.created_at:
-                repo_data["first_seen_at"] = repo.created_at.isoformat()
-
-            repo_result = (
-                self._client.table("gt_repositories")
-                .upsert(repo_data, on_conflict="full_name")
-                .execute()
-            )
-            repo_id = repo_result.data[0]["id"]
-            repo_ids.append(repo_id)
-
+            repo_id = repo_id_by_full_name.get(repo.full_name)
+            if not repo_id:
+                continue
             if repo.summary or repo.overall_score > 0:
-                self._client.table("gt_analyses").insert({
+                analyses.append({
                     "repository_id": repo_id,
                     "health_score": repo.health_score,
                     "activity_score": repo.activity_score,
@@ -135,9 +158,11 @@ class SupabaseStorage:
                     "use_cases": repo.use_cases,
                     "integration_tips": repo.integration_tips,
                     "potential_risks": repo.potential_risks,
-                    "model_used": get_settings().openai_model,
+                    "model_used": model_name,
                     "analyzed_at": repo.analyzed_at.isoformat() if repo.analyzed_at else None,
-                }).execute()
+                })
+        if analyses:
+            self._client.table("gt_analyses").insert(analyses).execute()
 
         return repo_ids
 

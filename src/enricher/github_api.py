@@ -2,21 +2,14 @@ from datetime import UTC, datetime
 
 import httpx
 
-from src.config import get_settings
 from src.models import EnrichedRepo, TrendingRepo
+from src.utils import build_github_api_headers
 
 GITHUB_API_BASE = "https://api.github.com"
 
 
 def _get_headers() -> dict[str, str]:
-    settings = get_settings()
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    if settings.github_token:
-        headers["Authorization"] = f"Bearer {settings.github_token}"
-    return headers
+    return build_github_api_headers()
 
 
 def _calculate_days_since_push(pushed_at: datetime | None) -> int | None:

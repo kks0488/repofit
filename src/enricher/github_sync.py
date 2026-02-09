@@ -10,14 +10,12 @@ GitHub Account Sync - 사용자의 GitHub 레포를 프로젝트로 동기화
 import httpx
 
 from src.config import get_settings
+from src.utils import build_github_api_headers
 
 
 def get_authenticated_user(token: str) -> dict | None:
     """인증된 사용자 정보 가져오기"""
-    headers = {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json",
-    }
+    headers = build_github_api_headers(token=token)
 
     try:
         with httpx.Client(timeout=30) as client:
@@ -32,10 +30,7 @@ def get_authenticated_user(token: str) -> dict | None:
 
 def get_user_repos(token: str, username: str = None, include_private: bool = True) -> list[dict]:
     """사용자의 레포 목록 가져오기"""
-    headers = {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json",
-    }
+    headers = build_github_api_headers(token=token)
 
     repos = []
     page = 1
@@ -78,10 +73,7 @@ def get_user_repos(token: str, username: str = None, include_private: bool = Tru
 
 def get_starred_repos(token: str, limit: int = 50) -> list[dict]:
     """사용자가 스타한 레포 목록 가져오기"""
-    headers = {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json",
-    }
+    headers = build_github_api_headers(token=token)
 
     repos = []
 

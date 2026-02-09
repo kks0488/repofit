@@ -2,8 +2,8 @@ import re
 
 import httpx
 
-from src.config import get_settings
 from src.models import TrendingRepo
+from src.utils import build_github_api_headers
 
 GITHUB_SEARCH_URL = "https://api.github.com/search/repositories"
 
@@ -108,15 +108,7 @@ def build_project_queries(
 
 
 def _get_headers() -> dict[str, str]:
-    settings = get_settings()
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "RepoFitBot/0.1",
-    }
-    if settings.github_token:
-        headers["Authorization"] = f"Bearer {settings.github_token}"
-    return headers
+    return build_github_api_headers(user_agent="RepoFitBot/0.1")
 
 
 async def search_github_repos(
