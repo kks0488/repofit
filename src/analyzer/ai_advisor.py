@@ -31,13 +31,13 @@ Provide your analysis in the following JSON format:
     "community_score": <0-100 based on stars, forks, contributors>,
     "documentation_score": <0-100 estimate based on description quality>,
     "overall_score": <0-100 weighted average>,
-    "summary": "<1-2 sentence summary of what this repo does and why it's trending>",
-    "use_cases": ["<use case 1>", "<use case 2>", "<use case 3>"],
-    "integration_tips": "<how a developer could integrate this into their project>",
-    "potential_risks": ["<risk 1>", "<risk 2>"]
+    "summary": "<이 레포가 뭘 하는지, 왜 주목할 만한지 한국어 1-2문장 요약>",
+    "use_cases": ["<활용 사례 1>", "<활용 사례 2>", "<활용 사례 3>"],
+    "integration_tips": "<프로젝트에 통합하는 방법 한국어로>",
+    "potential_risks": ["<위험요소 1>", "<위험요소 2>"]
 }}
 
-Be concise and practical. Focus on actionable insights for developers."""
+반드시 한국어로 답변하세요. 간결하고 실용적으로, 개발자에게 유용한 인사이트 중심으로."""
 
 
 _openai_client: OpenAI | None = None
@@ -207,7 +207,7 @@ async def analyze_single_repo(
             community_score=basic_scores["community_score"],
             documentation_score=basic_scores["documentation_score"],
             overall_score=basic_scores["overall_score"],
-            summary=f"Trending {repo.language or ''} repository with {repo.stars} stars.",
+            summary=f"트렌딩 {repo.language or ''} 레포, 스타 {repo.stars}개.",
             use_cases=[],
             integration_tips=None,
             potential_risks=[],
@@ -251,7 +251,7 @@ async def analyze_single_repo(
             community_score=basic_scores["community_score"],
             documentation_score=basic_scores["documentation_score"],
             overall_score=basic_scores["overall_score"],
-            summary=f"Trending {repo.language or ''} repository with {repo.stars} stars.",
+            summary=f"트렌딩 {repo.language or ''} 레포, 스타 {repo.stars}개.",
             use_cases=[],
             integration_tips=None,
             potential_risks=[],
