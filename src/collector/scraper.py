@@ -108,12 +108,3 @@ async def fetch_trending(
         )
 
     return repos
-
-
-async def fetch_trending_sync(
-    language: str | None = None,
-    since: SinceFilter = "daily",
-) -> list[TrendingRepo]:
-    import asyncio
-
-    return asyncio.run(fetch_trending(language, since))

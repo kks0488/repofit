@@ -230,8 +230,10 @@ gt schedule --hour 19 --minute 0 --notify
 SUPABASE_URL=your-supabase-url
 SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_KEY=your-service-key
-GEMINI_API_KEY=your-gemini-key
-GEMINI_MODEL=gemini-2.5-flash
+OPENAI_API_KEY=your-openai-key
+OPENAI_BASE_URL=http://100.68.66.51:8317/v1
+OPENAI_MODEL=gpt-5.2
+OPENAI_EMBEDDING_API_KEY=your-openai-embedding-key
 GITHUB_TOKEN=your-github-token  # For github-sync
 
 # Slack Bot (optional but recommended)
@@ -272,7 +274,9 @@ To change the time, edit `~/.config/systemd/user/repofit-daily.timer` and update
 
 Use `.github/workflows/daily-sync.yml` with secrets:
 - `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`
-- `GEMINI_API_KEY`
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`
+- `OPENAI_MODEL`
 - `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID`
 
 ## Tech Stack
@@ -280,8 +284,8 @@ Use `.github/workflows/daily-sync.yml` with secrets:
 | Component | Technology |
 |-----------|------------|
 | CLI | Python, Typer, Rich |
-| AI | Google Gemini (analysis + embeddings) |
-| AI SDK | google-genai, langchain, langchain-google-genai |
+| AI | OpenAI-compatible API (analysis + embeddings) |
+| AI SDK | openai, langchain |
 | RAG | langchain + pgvector retrieval |
 | Database | Supabase (PostgreSQL + pgvector) |
 | Frontend | Next.js 16, React 19, Tailwind CSS 4 |
@@ -291,7 +295,7 @@ Use `.github/workflows/daily-sync.yml` with secrets:
 ## Troubleshooting
 
 - **Schema missing**: Run `schema.sql` in Supabase SQL Editor
-- **No recommendations**: Set `GEMINI_API_KEY`, then run `gt quickstart`
+- **No recommendations**: Set `OPENAI_EMBEDDING_API_KEY`, then run `gt quickstart`
 - **Slack not working**: Check `SLACK_BOT_TOKEN` and `SLACK_CHANNEL_ID`
 - **No project matches**: Register projects with `gt project-add` first
 - **GitHub sync fails**: Check `GITHUB_TOKEN` permissions (repo scope)

@@ -1,41 +1,48 @@
 
-from google import genai
+from openai import OpenAI
 
 from src.config import get_settings
 
-EMBEDDING_MODEL = "models/text-embedding-004"
+EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIM = 768
 
 
-class GeminiEmbedder:
+class OpenAIEmbedder:
     def __init__(self) -> None:
         settings = get_settings()
-        self._client = genai.Client(api_key=settings.gemini_api_key)
+        self._client = OpenAI(
+            api_key=settings.openai_embedding_api_key,
+            base_url="https://api.openai.com/v1",
+        )
 
     def embed(self, text: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list[float]:
-        result = self._client.models.embed_content(
+        response = self._client.embeddings.create(
             model=EMBEDDING_MODEL,
-            contents=text,
-            config={"task_type": task_type},
+            input=text,
+            dimensions=EMBEDDING_DIM,
         )
-        if not result.embeddings:
+        if not response.data:
             return []
-        return result.embeddings[0].values or []
+        return response.data[0].embedding
 
     def embed_batch(self, texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT") -> list[list[float]]:
-        embeddings = []
-        for text in texts:
-            embeddings.append(self.embed(text, task_type))
-        return embeddings
+        if not texts:
+            return []
+        response = self._client.embeddings.create(
+            model=EMBEDDING_MODEL,
+            input=texts,
+            dimensions=EMBEDDING_DIM,
+        )
+        return [item.embedding for item in sorted(response.data, key=lambda x: x.index)]
 
 
-_embedder: GeminiEmbedder | None = None
+_embedder: OpenAIEmbedder | None = None
 
 
-def _get_embedder() -> GeminiEmbedder:
+def _get_embedder() -> OpenAIEmbedder:
     global _embedder
     if _embedder is None:
-        _embedder = GeminiEmbedder()
+        _embedder = OpenAIEmbedder()
     return _embedder
 
 

@@ -15,8 +15,11 @@ class Settings(BaseSettings):
     supabase_anon_key: str
     supabase_service_key: str
 
-    gemini_api_key: str
-    gemini_model: str = "gemini-2.5-flash-preview-05-20"
+    openai_api_key: str = ""
+    openai_base_url: str = "http://100.68.66.51:8317/v1"
+    openai_model: str = "gpt-5.2"
+
+    openai_embedding_api_key: str = ""
 
     github_token: str = ""
 

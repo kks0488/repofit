@@ -39,7 +39,7 @@ def trending(
     since: str = typer.Option("daily", "--since", "-s", help="Time range: daily, weekly, monthly"),
     limit: int = typer.Option(25, "--limit", "-n", help="Number of repositories to show"),
     enrich: bool = typer.Option(True, "--enrich/--no-enrich", help="Fetch additional metadata from GitHub API"),
-    analyze: bool = typer.Option(False, "--analyze/--no-analyze", "-a", help="Run AI analysis (requires Gemini API)"),
+    analyze: bool = typer.Option(False, "--analyze/--no-analyze", "-a", help="Run AI analysis (requires OpenAI config)"),
     save: bool = typer.Option(False, "--save", help="Save results to Supabase"),
 ) -> None:
     from src.analyzer import analyze_repos
@@ -215,7 +215,7 @@ def setup() -> None:
         settings = get_settings()
         console.print("[green]:white_check_mark: Configuration loaded successfully[/green]")
         console.print(f"  Supabase URL: {settings.supabase_url[:50]}...")
-        console.print(f"  Gemini Model: {settings.gemini_model}")
+        console.print(f"  OpenAI Model: {settings.openai_model}")
         console.print(f"  GitHub Token: {'Set' if settings.github_token else 'Not set (optional)'}")
 
         slack_configured = bool(settings.slack_bot_token and settings.slack_channel_id)
@@ -298,7 +298,7 @@ def quickstart(
         None,
         "--analyze/--no-analyze",
         "-a",
-        help="Run AI analysis when GEMINI_API_KEY is set",
+        help="Run AI analysis when OpenAI config is available",
     ),
 ) -> None:
     """Seed trending data and optionally generate recommendations."""
@@ -322,10 +322,12 @@ def quickstart(
         console.print("[yellow]Supabase schema not found. Run schema.sql in Supabase SQL Editor.[/yellow]")
         raise typer.Exit(1)
 
+    ai_ready = bool(settings.openai_base_url and settings.openai_model)
+
     if analyze is None:
-        use_ai = bool(settings.gemini_api_key)
-    elif analyze and not settings.gemini_api_key:
-        console.print("[yellow]GEMINI_API_KEY not set. Running without AI analysis.[/yellow]")
+        use_ai = ai_ready
+    elif analyze and not ai_ready:
+        console.print("[yellow]OpenAI config not set. Running without AI analysis.[/yellow]")
         use_ai = False
     else:
         use_ai = bool(analyze)
@@ -349,13 +351,13 @@ def quickstart(
             snapshot_id = storage.save_snapshot(analyzed, language=language)
             console.print(f"[green]Saved snapshot: {snapshot_id}[/green]")
 
-        if settings.gemini_api_key:
+        if settings.openai_embedding_api_key:
             with console.status("[bold cyan]Running matching pipeline..."):
                 recommender = Recommender()
                 result = recommender.run_full_pipeline()
                 console.print(f"[green]Generated {result['total_recommendations']} recommendations[/green]")
         else:
-            console.print("[yellow]GEMINI_API_KEY not set. Skipping recommendations.[/yellow]")
+            console.print("[yellow]OPENAI_EMBEDDING_API_KEY not set. Skipping recommendations.[/yellow]")
 
         console.print("Next steps: `gt recommendations` or `cd web && npm run dev`")
 
@@ -373,7 +375,7 @@ def discover(
         None,
         "--analyze/--no-analyze",
         "-a",
-        help="Run AI analysis when GEMINI_API_KEY is set",
+        help="Run AI analysis when OpenAI config is available",
     ),
     save: bool = typer.Option(True, "--save/--no-save", help="Save results to Supabase"),
 ) -> None:
@@ -392,10 +394,12 @@ def discover(
         console.print(f"[red]Configuration error: {exc}[/red]")
         raise typer.Exit(1)
 
+    ai_ready = bool(settings.openai_base_url and settings.openai_model)
+
     if analyze is None:
-        use_ai = bool(settings.gemini_api_key)
-    elif analyze and not settings.gemini_api_key:
-        console.print("[yellow]GEMINI_API_KEY not set. Running without AI analysis.[/yellow]")
+        use_ai = ai_ready
+    elif analyze and not ai_ready:
+        console.print("[yellow]OpenAI config not set. Running without AI analysis.[/yellow]")
         use_ai = False
     else:
         use_ai = bool(analyze)

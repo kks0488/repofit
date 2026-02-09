@@ -43,7 +43,7 @@ class RepoFitBot:
         self.bot_user_id: str | None = None
         self.projects_path = Path(projects_path).expanduser().resolve()
 
-        # RAG 체인 (langchain + Gemini + Supabase 벡터 검색)
+        # RAG 체인 (langchain + OpenAI + Supabase 벡터 검색)
         self.rag = RepoFitRAG()
 
         # 이벤트 핸들러 등록

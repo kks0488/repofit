@@ -1,13 +1,12 @@
 """
 RepoFit RAG - Retrieval-Augmented Generation for Slack Bot
 
-langchain + Gemini + Supabase pgvector를 사용하여
+langchain + OpenAI + Supabase pgvector를 사용하여
 저장된 레포 데이터를 검색하고 더 정확한 답변을 제공합니다.
 """
 
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from src.config import get_settings
 from src.storage import SupabaseStorage
@@ -20,17 +19,20 @@ class RepoFitRAG:
         settings = get_settings()
         self.storage = SupabaseStorage()
 
-        # Gemini 모델
-        self.llm = ChatGoogleGenerativeAI(
-            model=settings.gemini_model,
-            google_api_key=settings.gemini_api_key,
+        # Chat 모델 (프록시 경유)
+        self.llm = ChatOpenAI(
+            model=settings.openai_model,
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
             temperature=0.7,
         )
 
-        # 임베딩 모델
-        self.embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/text-embedding-004",
-            google_api_key=settings.gemini_api_key,
+        # 임베딩 모델 (직접 OpenAI API)
+        self.embeddings = OpenAIEmbeddings(
+            model="text-embedding-3-small",
+            api_key=settings.openai_embedding_api_key,
+            base_url="https://api.openai.com/v1",
+            dimensions=768,
         )
 
         # 시스템 프롬프트

@@ -83,7 +83,7 @@ class SupabaseStorage:
                     "use_cases": repo.use_cases,
                     "integration_tips": repo.integration_tips,
                     "potential_risks": repo.potential_risks,
-                    "model_used": get_settings().gemini_model,
+                    "model_used": get_settings().openai_model,
                     "analyzed_at": repo.analyzed_at.isoformat() if repo.analyzed_at else None,
                 }).execute()
 
@@ -135,7 +135,7 @@ class SupabaseStorage:
                     "use_cases": repo.use_cases,
                     "integration_tips": repo.integration_tips,
                     "potential_risks": repo.potential_risks,
-                    "model_used": get_settings().gemini_model,
+                    "model_used": get_settings().openai_model,
                     "analyzed_at": repo.analyzed_at.isoformat() if repo.analyzed_at else None,
                 }).execute()
 

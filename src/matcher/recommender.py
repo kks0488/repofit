@@ -1,11 +1,14 @@
+import logging
 
-from src.embedder.gemini_embedder import (
+from src.embedder.openai_embedder import (
     create_project_summary,
     create_repo_summary,
     embed_text,
 )
 from src.notifier import SlackNotifier
 from src.storage import SupabaseStorage
+
+logger = logging.getLogger(__name__)
 
 
 class Recommender:
@@ -46,7 +49,12 @@ class Recommender:
                 embedding = embed_text(summary)
                 self.storage.update_repo_embedding(repo["id"], embedding)
                 count += 1
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "Failed to embed repository %s: %s",
+                    repo.get("full_name", repo.get("id", "unknown")),
+                    exc,
+                )
                 continue
         return count
 
@@ -66,7 +74,12 @@ class Recommender:
                 embedding = embed_text(summary)
                 self.storage.update_project_embedding(project["id"], embedding)
                 count += 1
-            except Exception:
+            except Exception as exc:
+                logger.warning(
+                    "Failed to embed project %s: %s",
+                    project.get("name", project.get("id", "unknown")),
+                    exc,
+                )
                 continue
         return count
 
@@ -114,11 +127,11 @@ class Recommender:
 
             reasons = []
             if embedding_sim > 0.7:
-                reasons.append({"type": "semantic", "text": "Semantically similar to your project"})
+                reasons.append({"type": "semantic", "text": "프로젝트와 유사한 기능/목적"})
             if overlaps:
-                reasons.append({"type": "stack", "text": f"Stack overlap: {', '.join(overlaps)}"})
+                reasons.append({"type": "stack", "text": f"기술 스택 일치: {', '.join(overlaps)}"})
             if repo_data.get("stars_today", 0) > 100:
-                reasons.append({"type": "trending", "text": f"Hot today: +{repo_data['stars_today']} stars"})
+                reasons.append({"type": "trending", "text": f"오늘 급상승 🔥 +{repo_data['stars_today']}"})
 
             self.storage.save_recommendation(
                 project_id=project_id,

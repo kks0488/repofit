@@ -1,3 +1,3 @@
-from src.embedder.gemini_embedder import GeminiEmbedder, embed_batch, embed_text
+from src.embedder.openai_embedder import OpenAIEmbedder, embed_batch, embed_text
 
-__all__ = ["GeminiEmbedder", "embed_text", "embed_batch"]
+__all__ = ["OpenAIEmbedder", "embed_text", "embed_batch"]

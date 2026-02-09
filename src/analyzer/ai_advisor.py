@@ -1,11 +1,14 @@
 import asyncio
 import json
+import logging
 from datetime import UTC, datetime
 
-from google import genai
+from openai import OpenAI
 
 from src.config import get_settings
 from src.models import AnalyzedRepo, EnrichedRepo
+
+logger = logging.getLogger(__name__)
 
 ANALYSIS_PROMPT = """Analyze this GitHub repository and provide insights.
 
@@ -36,15 +39,18 @@ Provide your analysis in the following JSON format:
 Be concise and practical. Focus on actionable insights for developers."""
 
 
-_genai_client: genai.Client | None = None
+_openai_client: OpenAI | None = None
 
 
-def _get_genai_client() -> genai.Client:
-    global _genai_client
-    if _genai_client is None:
+def _get_openai_client() -> OpenAI:
+    global _openai_client
+    if _openai_client is None:
         settings = get_settings()
-        _genai_client = genai.Client(api_key=settings.gemini_api_key)
-    return _genai_client
+        _openai_client = OpenAI(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
+        )
+    return _openai_client
 
 
 def _calculate_basic_scores(repo: EnrichedRepo) -> dict[str, int]:
@@ -84,7 +90,7 @@ def _calculate_basic_scores(repo: EnrichedRepo) -> dict[str, int]:
 
 
 async def analyze_single_repo(
-    client: genai.Client,
+    client: OpenAI,
     model_name: str,
     repo: EnrichedRepo,
 ) -> AnalyzedRepo:
@@ -107,11 +113,13 @@ async def analyze_single_repo(
 
     try:
         response = await asyncio.to_thread(
-            client.models.generate_content,
+            client.chat.completions.create,
             model=model_name,
-            contents=prompt,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+            max_tokens=1024,
         )
-        text = (response.text or "").strip()
+        text = (response.choices[0].message.content or "").strip()
 
         if text.startswith("```json"):
             text = text[7:]
@@ -162,7 +170,56 @@ async def analyze_single_repo(
             collected_at=now,
         )
 
-    except (json.JSONDecodeError, Exception):
+    except json.JSONDecodeError as exc:
+        logger.warning(
+            "Failed to parse AI analysis JSON for %s: %s",
+            repo.full_name,
+            exc,
+        )
+        return AnalyzedRepo(
+            rank=repo.rank,
+            github_id=repo.github_id,
+            owner=repo.owner,
+            name=repo.name,
+            full_name=repo.full_name,
+            url=repo.url,
+            description=repo.description,
+            language=repo.language,
+            stars=repo.stars,
+            stars_today=repo.stars_today,
+            forks=repo.forks,
+            open_issues=repo.open_issues,
+            watchers=repo.watchers,
+            created_at=repo.created_at,
+            updated_at=repo.updated_at,
+            pushed_at=repo.pushed_at,
+            license=repo.license,
+            topics=repo.topics,
+            default_branch=repo.default_branch,
+            has_wiki=repo.has_wiki,
+            has_discussions=repo.has_discussions,
+            archived=repo.archived,
+            days_since_push=repo.days_since_push,
+            is_active=repo.is_active,
+            health_score=basic_scores["health_score"],
+            activity_score=basic_scores["activity_score"],
+            community_score=basic_scores["community_score"],
+            documentation_score=basic_scores["documentation_score"],
+            overall_score=basic_scores["overall_score"],
+            summary=f"Trending {repo.language or ''} repository with {repo.stars} stars.",
+            use_cases=[],
+            integration_tips=None,
+            potential_risks=[],
+            analyzed_at=now,
+            collected_at=now,
+        )
+    except Exception as exc:
+        logger.error(
+            "AI analysis failed for %s: %s",
+            repo.full_name,
+            exc,
+            exc_info=True,
+        )
         return AnalyzedRepo(
             rank=repo.rank,
             github_id=repo.github_id,
@@ -248,13 +305,13 @@ async def analyze_repos(
         return [_enriched_to_analyzed(repo, _calculate_basic_scores(repo)) for repo in repos]
 
     settings = get_settings()
-    client = _get_genai_client()
+    client = _get_openai_client()
 
     analyzed: list[AnalyzedRepo] = []
 
     for i in range(0, len(repos), batch_size):
         batch = repos[i : i + batch_size]
-        tasks = [analyze_single_repo(client, settings.gemini_model, repo) for repo in batch]
+        tasks = [analyze_single_repo(client, settings.openai_model, repo) for repo in batch]
         results = await asyncio.gather(*tasks)
         analyzed.extend(results)
         if i + batch_size < len(repos):

@@ -68,7 +68,7 @@ class SlackNotifier:
         top_repos: list[dict] | None = None,
     ) -> bool:
         blocks = self._build_trending_blocks(total_repos, language, top_repos or [])
-        fallback = f"GitHub Trending: {total_repos} repos analyzed ({language or 'All'})"
+        fallback = f"📈 오늘의 트렌딩: {total_repos}개 레포 분석 ({language or '전체'})"
         return self.send_message(text=fallback, blocks=blocks)
 
     def notify_recommendations(
@@ -87,7 +87,7 @@ class SlackNotifier:
         )
 
         count = len(recommendations)
-        fallback = f"Found {count} recommendation(s) with score >= {threshold:.0%}"
+        fallback = f"🎯 맞춤 추천 {count}개 (적합도 {threshold:.0%} 이상)"
         return self.send_message(text=fallback, blocks=blocks)
 
     def _build_trending_blocks(
@@ -100,32 +100,34 @@ class SlackNotifier:
 
         blocks.append({
             "type": "header",
-            "text": {"type": "plain_text", "text": "GitHub Trending Daily", "emoji": True},
+            "text": {"type": "plain_text", "text": "📈 오늘의 GitHub 트렌딩", "emoji": True},
         })
 
-        lang_text = language or "All Languages"
+        lang_text = language or "전체 언어"
         blocks.append({
             "type": "section",
-            "text": {"type": "mrkdwn", "text": f"*{total_repos}* repositories analyzed ({lang_text})"},
+            "text": {"type": "mrkdwn", "text": f"총 *{total_repos}*개 레포지토리 분석 완료 ({lang_text})"},
         })
 
         if top_repos:
             blocks.append({"type": "divider"})
-            blocks.append({
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": "*Top Trending Today:*"},
-            })
 
-            for repo in top_repos[:5]:
+            medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+            for i, repo in enumerate(top_repos[:5]):
                 name = repo.get("full_name", "unknown")
                 stars = repo.get("stars", 0)
                 stars_today = repo.get("stars_today", 0)
-                lang = repo.get("language") or "-"
+                lang = repo.get("language") or ""
+
+                lang_badge = f"`{lang}`" if lang else ""
+                stars_text = f"⭐ {stars:,}"
+                today_text = f"  _+{stars_today} 오늘_" if stars_today else ""
+
                 blocks.append({
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"<https://github.com/{name}|*{name}*> | {lang} | {stars} stars (+{stars_today} today)",
+                        "text": f"{medals[i]} <https://github.com/{name}|*{name}*>  {lang_badge}\n      {stars_text}{today_text}",
                     },
                 })
 
@@ -141,58 +143,80 @@ class SlackNotifier:
 
         blocks.append({
             "type": "header",
-            "text": {"type": "plain_text", "text": "GitHub Trending: New Recommendations", "emoji": True},
+            "text": {"type": "plain_text", "text": "🎯 맞춤 레포 추천", "emoji": True},
         })
 
         if trending_summary:
-            lang = trending_summary.get("language") or "All Languages"
+            lang = trending_summary.get("language") or "전체 언어"
             total = trending_summary.get("total_repos", 0)
             blocks.append({
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*Trending Today* ({lang}): {total} repositories analyzed"},
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": f"📊 오늘 트렌딩 {total}개 분석 ({lang})"}],
             })
-            blocks.append({"type": "divider"})
 
         blocks.append({
             "type": "section",
-            "text": {"type": "mrkdwn", "text": f"*{len(recommendations)} recommendation(s)* above threshold ({threshold:.0%})"},
+            "text": {"type": "mrkdwn", "text": f"✨ *{len(recommendations)}개 추천* (적합도 {threshold:.0%} 이상)"},
         })
+        blocks.append({"type": "divider"})
 
-        for rec in recommendations[:5]:
-            score = rec.get("score", 0)
-            full_name = rec.get("full_name", "unknown")
-            project_name = rec.get("project_name", "")
-            reasons = rec.get("reasons", [])
-            stars = rec.get("stars", 0)
+        # 프로젝트별로 그룹화
+        by_project: dict[str, list[dict]] = {}
+        for rec in recommendations:
+            proj = rec.get("project_name", "기타")
+            if proj not in by_project:
+                by_project[proj] = []
+            by_project[proj].append(rec)
 
-            reason_text = ""
-            if reasons and isinstance(reasons[0], dict):
-                reason_text = f"\n>{reasons[0].get('text', '')}"
-            elif reasons and isinstance(reasons[0], str):
-                reason_text = f"\n>{reasons[0]}"
-
+        for project_name, recs in list(by_project.items())[:3]:
+            # 프로젝트 헤더
             blocks.append({
                 "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": (
-                        f"*<https://github.com/{full_name}|{full_name}>* ({stars} stars)\n"
-                        f"Score: *{score:.0%}* | For: _{project_name}_"
-                        f"{reason_text}"
-                    ),
-                },
+                "text": {"type": "mrkdwn", "text": f"📁 *{project_name}*"},
             })
 
-        if len(recommendations) > 5:
+            # 해당 프로젝트의 추천 레포들
+            for rec in recs[:3]:
+                score = rec.get("score", 0)
+                full_name = rec.get("full_name", "unknown")
+                reasons = rec.get("reasons", [])
+                stars = rec.get("stars", 0)
+
+                # 점수 표시 바
+                score_bar = "█" * int(score * 10) + "░" * (10 - int(score * 10))
+
+                # reason 텍스트 처리
+                reason_text = ""
+                if reasons:
+                    first_reason = reasons[0]
+                    if isinstance(first_reason, dict):
+                        reason_text = first_reason.get("text", "")
+                    elif isinstance(first_reason, str):
+                        reason_text = first_reason
+
+                text_content = (
+                    f"<https://github.com/{full_name}|*{full_name}*>\n"
+                    f"`{score_bar}` *{score:.0%}*  ⭐ {stars:,}"
+                )
+                if reason_text:
+                    text_content += f"\n_{reason_text}_"
+
+                blocks.append({
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": text_content},
+                })
+
+        remaining = len(recommendations) - sum(min(3, len(r)) for r in list(by_project.values())[:3])
+        if remaining > 0:
             blocks.append({
                 "type": "context",
-                "elements": [{"type": "mrkdwn", "text": f"_...and {len(recommendations) - 5} more_"}],
+                "elements": [{"type": "mrkdwn", "text": f"_...외 {remaining}개 더 있음_"}],
             })
 
         blocks.append({"type": "divider"})
         blocks.append({
             "type": "context",
-            "elements": [{"type": "mrkdwn", "text": "View all: `gt recommendations` | Web: http://localhost:3003"}],
+            "elements": [{"type": "mrkdwn", "text": "🔍 전체 보기: `gt recommendations`"}],
         })
 
         return blocks
