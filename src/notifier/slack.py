@@ -1,5 +1,7 @@
 
 import logging
+import re
+from collections import defaultdict
 
 import httpx
 
@@ -67,8 +69,12 @@ class SlackNotifier:
         language: str | None = None,
         top_repos: list[dict] | None = None,
     ) -> bool:
-        blocks = self._build_trending_blocks(total_repos, language, top_repos or [])
-        fallback = f"📈 오늘의 트렌딩: {total_repos}개 레포 분석 ({language or '전체'})"
+        curated_repos = self._select_daily_curation(top_repos or [], limit=10)
+        blocks = self._build_trending_blocks(total_repos, language, curated_repos)
+        fallback = (
+            f"📌 RepoFit Daily Curation: {len(curated_repos)} picks "
+            f"from {total_repos} trending repos ({language or 'all languages'})"
+        )
         return self.send_message(text=fallback, blocks=blocks)
 
     def notify_recommendations(
@@ -100,38 +106,177 @@ class SlackNotifier:
 
         blocks.append({
             "type": "header",
-            "text": {"type": "plain_text", "text": "📈 오늘의 GitHub 트렌딩", "emoji": True},
+            "text": {"type": "plain_text", "text": "📌 RepoFit Daily Trending Curation", "emoji": True},
         })
 
-        lang_text = language or "전체 언어"
+        lang_text = language or "All languages"
+        curated_count = len(top_repos)
         blocks.append({
             "type": "section",
-            "text": {"type": "mrkdwn", "text": f"총 *{total_repos}*개 레포지토리 분석 완료 ({lang_text})"},
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    f"*{curated_count} curated picks* from *{total_repos}* trending repos "
+                    f"({lang_text})"
+                ),
+            },
         })
 
         if top_repos:
             blocks.append({"type": "divider"})
 
-            medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
-            for i, repo in enumerate(top_repos[:5]):
-                name = repo.get("full_name", "unknown")
-                stars = repo.get("stars", 0)
-                stars_today = repo.get("stars_today", 0)
-                lang = repo.get("language") or ""
+            grouped: dict[str, list[dict]] = defaultdict(list)
+            for repo in top_repos[:10]:
+                grouped[self._category_for_repo(repo)].append(repo)
 
-                lang_badge = f"`{lang}`" if lang else ""
-                stars_text = f"⭐ {stars:,}"
-                today_text = f"  _+{stars_today} 오늘_" if stars_today else ""
+            ordered_categories = [
+                "AI/ML",
+                "Frontend",
+                "Backend",
+                "DevOps",
+                "Data",
+                "Mobile",
+                "Security",
+                "Developer Tools",
+                "General",
+            ]
+            for category in ordered_categories:
+                repos = grouped.get(category)
+                if not repos:
+                    continue
 
                 blocks.append({
                     "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"{medals[i]} <https://github.com/{name}|*{name}*>  {lang_badge}\n      {stars_text}{today_text}",
-                    },
+                    "text": {"type": "mrkdwn", "text": f"*{category}*"},
                 })
 
+                for repo in repos:
+                    name = repo.get("full_name", "unknown")
+                    url = repo.get("url") or f"https://github.com/{name}"
+                    stars = int(repo.get("stars", 0) or 0)
+                    stars_today = int(repo.get("stars_today", 0) or 0)
+                    lang = repo.get("language") or ""
+                    lang_badge = f"`{lang}` " if lang else ""
+                    rising_badge = " ⚡ *Rising fast*" if self._is_rising_fast(repo) else ""
+                    why_line = self._build_one_line_why(repo)
+
+                    blocks.append({
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": (
+                                f"• <{url}|*{name}*> {lang_badge}\n"
+                                f"  ⭐ {stars:,} · +{stars_today:,} today{rising_badge}\n"
+                                f"  _Why: {why_line}_"
+                            ),
+                        },
+                    })
+
+            blocks.append({"type": "divider"})
+            blocks.append({
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": "Top 10 only: highest momentum and quality signals."}],
+            })
+
         return blocks
+
+    def _select_daily_curation(self, repos: list[dict], limit: int = 10) -> list[dict]:
+        ranked = sorted(repos, key=self._curation_score, reverse=True)
+        return ranked[:limit]
+
+    def _curation_score(self, repo: dict) -> float:
+        stars = max(int(repo.get("stars", 0) or 0), 1)
+        stars_today = max(int(repo.get("stars_today", 0) or 0), 0)
+        overall = min(100, max(0, int(repo.get("overall_score", 50) or 50)))
+
+        trend_score = min(1.0, stars_today / 250)
+        relative_growth = stars_today / stars
+        growth_score = min(1.0, relative_growth * 8)
+        quality_score = overall / 100
+        return (0.5 * trend_score) + (0.3 * growth_score) + (0.2 * quality_score)
+
+    def _is_rising_fast(self, repo: dict) -> bool:
+        stars = max(int(repo.get("stars", 0) or 0), 1)
+        stars_today = max(int(repo.get("stars_today", 0) or 0), 0)
+        growth = stars_today / stars
+        return (stars_today >= 50 and growth >= 0.03) or (stars_today >= 200 and growth >= 0.015)
+
+    def _category_for_repo(self, repo: dict) -> str:
+        language = (repo.get("language") or "").lower()
+        topics = [str(topic).lower() for topic in (repo.get("topics") or [])]
+        text = " ".join(
+            [
+                language,
+                " ".join(topics),
+                str(repo.get("description") or "").lower(),
+                str(repo.get("summary") or "").lower(),
+                str(repo.get("full_name") or "").lower(),
+            ]
+        )
+        tokens = set(re.findall(r"[a-z0-9#+.-]+", text))
+
+        category_keywords = {
+            "AI/ML": [
+                "ai", "ml", "llm", "agent", "rag", "langchain", "gpt", "diffusion", "embedding",
+                "transformer", "pytorch", "tensorflow",
+            ],
+            "Frontend": [
+                "react", "next", "vue", "svelte", "angular", "tailwind", "frontend", "ui", "css",
+                "web component", "vite", "astro",
+            ],
+            "Backend": [
+                "api", "backend", "server", "fastapi", "django", "flask", "spring", "express",
+                "microservice", "graphql", "rest",
+            ],
+            "DevOps": [
+                "devops", "kubernetes", "docker", "terraform", "ansible", "ci/cd", "cicd", "helm",
+                "observability", "monitoring", "platform",
+            ],
+            "Data": [
+                "data", "etl", "analytics", "warehouse", "dbt", "spark", "postgres", "sql",
+                "lakehouse", "pipeline",
+            ],
+            "Mobile": [
+                "android", "ios", "swift", "kotlin", "react-native", "flutter", "mobile",
+            ],
+            "Security": [
+                "security", "auth", "oauth", "jwt", "encryption", "vulnerability", "pentest",
+                "secret", "sandbox",
+            ],
+            "Developer Tools": [
+                "cli", "sdk", "linter", "formatter", "testing", "benchmark", "tooling", "compiler",
+                "build", "debug", "automation",
+            ],
+        }
+
+        exact_token_keywords = {"ai", "ml", "ui"}
+        for category, keywords in category_keywords.items():
+            for keyword in keywords:
+                if keyword in exact_token_keywords and keyword in tokens:
+                    return category
+                if keyword not in exact_token_keywords and keyword in text:
+                    return category
+        return "General"
+
+    def _build_one_line_why(self, repo: dict) -> str:
+        summary = str(repo.get("summary") or "").strip()
+        if summary:
+            summary = re.sub(r"\s+", " ", summary)
+            first_sentence = re.split(r"(?<=[.!?])\s+", summary, maxsplit=1)[0]
+            return self._truncate(first_sentence, max_len=140)
+
+        language = repo.get("language") or "multi-language"
+        stars_today = int(repo.get("stars_today", 0) or 0)
+        topics = [str(topic) for topic in (repo.get("topics") or []) if topic]
+        topic_hint = f" around {', '.join(topics[:2])}" if topics else ""
+        reason = f"Strong traction (+{stars_today} stars today) in {language}{topic_hint}."
+        return self._truncate(reason, max_len=140)
+
+    def _truncate(self, text: str, max_len: int = 140) -> str:
+        text = text.strip()
+        if len(text) <= max_len:
+            return text
+        return text[: max_len - 1].rstrip() + "…"
 
     def _build_recommendation_blocks(
         self,

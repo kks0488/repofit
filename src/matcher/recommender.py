@@ -159,8 +159,10 @@ class Recommender:
         notify: bool = False,
         score_threshold: float = 0.7,
         trending_summary: dict | None = None,
+        repo_embedding_limit: int = 50,
+        per_project_limit: int = 20,
     ) -> dict:
-        repos_embedded = self.embed_new_repos()
+        repos_embedded = self.embed_new_repos(limit=repo_embedding_limit)
         projects_embedded = self.embed_new_projects()
 
         projects = self.storage.get_projects()
@@ -171,6 +173,7 @@ class Recommender:
             recs = self.match_project_to_repos(
                 project_id=project["id"],
                 min_stars=min_stars,
+                limit=per_project_limit,
             )
             for r in recs:
                 r["project_name"] = project.get("name", "")
@@ -206,6 +209,8 @@ def run_matching_pipeline(
     notify: bool = False,
     score_threshold: float = 0.7,
     trending_summary: dict | None = None,
+    repo_embedding_limit: int = 50,
+    per_project_limit: int = 20,
 ) -> dict:
     recommender = Recommender()
     return recommender.run_full_pipeline(
@@ -213,4 +218,6 @@ def run_matching_pipeline(
         notify=notify,
         score_threshold=score_threshold,
         trending_summary=trending_summary,
+        repo_embedding_limit=repo_embedding_limit,
+        per_project_limit=per_project_limit,
     )

@@ -9,8 +9,8 @@ from rich.console import Console
 
 app = typer.Typer(
     name="gt",
-    help="GitHub Trending Analyzer - AI-powered open source discovery",
-    no_args_is_help=True,
+    help="RepoFit - AI-curated GitHub trending digest",
+    no_args_is_help=False,
 )
 console = Console()
 
@@ -33,14 +33,55 @@ def _write_env_file(path: Path, values: dict[str, str]) -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
+def _daily_curation_score(repo) -> float:
+    stars = max(int(getattr(repo, "stars", 0) or 0), 1)
+    stars_today = max(int(getattr(repo, "stars_today", 0) or 0), 0)
+    overall = min(100, max(0, int(getattr(repo, "overall_score", 50) or 50)))
+
+    trend_score = min(1.0, stars_today / 250)
+    growth_score = min(1.0, (stars_today / stars) * 8)
+    quality_score = overall / 100
+    return (0.5 * trend_score) + (0.3 * growth_score) + (0.2 * quality_score)
+
+
+def _curate_repos_for_digest(repos: list, limit: int = 10) -> list:
+    curated = sorted(repos, key=_daily_curation_score, reverse=True)[:limit]
+    for rank, repo in enumerate(curated, start=1):
+        repo.rank = rank
+    return curated
+
+
+def _build_top_repo_payload(repos: list, limit: int = 10) -> list[dict]:
+    return [
+        {
+            "full_name": repo.full_name,
+            "url": repo.url,
+            "description": repo.description,
+            "language": repo.language,
+            "topics": repo.topics,
+            "stars": repo.stars,
+            "stars_today": repo.stars_today,
+            "overall_score": repo.overall_score,
+            "summary": repo.summary,
+        }
+        for repo in _curate_repos_for_digest(repos, limit=limit)
+    ]
+
+
+@app.callback(invoke_without_command=True)
+def _default_to_trending(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        trending()
+
+
 @app.command()
 def trending(
     language: str | None = typer.Option(None, "--lang", "-l", help="Filter by programming language"),
     since: str = typer.Option("daily", "--since", "-s", help="Time range: daily, weekly, monthly"),
-    limit: int = typer.Option(25, "--limit", "-n", help="Number of repositories to show"),
+    limit: int = typer.Option(10, "--limit", "-n", help="Number of curated repositories to show"),
     enrich: bool = typer.Option(True, "--enrich/--no-enrich", help="Fetch additional metadata from GitHub API"),
-    analyze: bool = typer.Option(False, "--analyze/--no-analyze", "-a", help="Run AI analysis (requires OpenAI config)"),
-    save: bool = typer.Option(False, "--save", help="Save results to Supabase"),
+    analyze: bool = typer.Option(True, "--analyze/--no-analyze", "-a", help="Run AI analysis for curation summaries"),
+    save: bool = typer.Option(False, "--save", help="Save analyzed results to Supabase"),
 ) -> None:
     from src.analyzer import analyze_repos
     from src.collector import fetch_trending
@@ -57,8 +98,9 @@ def trending(
             console.print("[red]No trending repositories found.[/red]")
             raise typer.Exit(1)
 
-        repos = repos[:limit]
-        console.print(f"[green]Found {len(repos)} trending repositories[/green]")
+        source_limit = max(limit * 3, 25)
+        repos = repos[:source_limit]
+        console.print(f"[green]Fetched {len(repos)} trending repositories for daily curation[/green]")
 
         if enrich:
             with console.status("[bold blue]Enriching with GitHub API data..."):
@@ -87,7 +129,8 @@ def trending(
         else:
             analyzed_repos = await analyze_repos(enriched_repos, skip_ai=True)
 
-        print_trending(analyzed_repos, title=f"Trending ({language or 'All'}, {since})")
+        curated = _curate_repos_for_digest(analyzed_repos, limit=limit)
+        print_trending(curated, title=f"Daily Curation ({language or 'All'}, {since})")
 
         if save:
             with console.status("[bold magenta]Saving to Supabase..."):
@@ -301,12 +344,11 @@ def quickstart(
         help="Run AI analysis when OpenAI config is available",
     ),
 ) -> None:
-    """Seed trending data and optionally generate recommendations."""
+    """Seed daily trending curation data quickly."""
     from src.analyzer import analyze_repos
     from src.collector import fetch_trending
     from src.config import get_settings
     from src.enricher import enrich_repos
-    from src.matcher import Recommender
     from src.storage import SupabaseStorage
 
     try:
@@ -351,15 +393,7 @@ def quickstart(
             snapshot_id = storage.save_snapshot(analyzed, language=language)
             console.print(f"[green]Saved snapshot: {snapshot_id}[/green]")
 
-        if settings.openai_embedding_api_key:
-            with console.status("[bold cyan]Running matching pipeline..."):
-                recommender = Recommender()
-                result = recommender.run_full_pipeline()
-                console.print(f"[green]Generated {result['total_recommendations']} recommendations[/green]")
-        else:
-            console.print("[yellow]OPENAI_EMBEDDING_API_KEY not set. Skipping recommendations.[/yellow]")
-
-        console.print("Next steps: `gt recommendations` or `cd web && npm run dev`")
+        console.print("Next steps: `gt digest` for Slack curation or `gt weekly-match` for project matching")
 
     asyncio.run(run())
 
@@ -471,7 +505,7 @@ def discover(
             with console.status("[bold magenta]Saving to database..."):
                 storage.upsert_repositories(analyzed)
             console.print("[green]Saved discovered repositories.[/green]")
-            console.print("Next: run [cyan]gt match[/cyan] to score against your projects.")
+            console.print("Next: run [cyan]gt weekly-match[/cyan] to score against your projects.")
 
     asyncio.run(run())
 
@@ -535,22 +569,16 @@ def project_add(
 
     console.print(f"[green]:white_check_mark: Project '{name}' created![/green]")
     console.print(f"[dim]ID: {project['id']}[/dim]")
-    console.print("\nRun [cyan]gt match[/cyan] to find matching trending repos.")
+    console.print("\nRun [cyan]gt weekly-match[/cyan] to find matching trending repos.")
 
 
-@app.command()
-def match(
-    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID to match"),
-    min_stars: int = typer.Option(100, "--min-stars", help="Minimum stars filter"),
-    limit: int = typer.Option(10, "--limit", "-n"),
-    notify: bool = typer.Option(False, "--notify", help="Send Slack notification for high-score matches"),
-    score_threshold: float | None = typer.Option(
-        None,
-        "--score-threshold",
-        help="Minimum score for notification (0.0-1.0)",
-    ),
+def _run_weekly_matching(
+    project_id: str | None = None,
+    min_stars: int = 50,
+    limit: int = 20,
+    notify: bool = False,
+    score_threshold: float | None = None,
 ) -> None:
-    """Find trending repos that match your projects."""
     from rich.table import Table
 
     from src.config import get_settings
@@ -560,26 +588,33 @@ def match(
     threshold = score_threshold if score_threshold is not None else settings.slack_notify_threshold
 
     recommender = Recommender()
+    per_project_limit = max(20, limit)
+    repo_embedding_limit = max(200, per_project_limit * 8)
 
-    with console.status("[bold blue]Embedding new repos and projects..."):
-        recommender.embed_new_repos()
+    with console.status("[bold blue]Weekly mode: embedding broader repo/project set..."):
+        recommender.embed_new_repos(limit=repo_embedding_limit)
         recommender.embed_new_projects()
 
     if project_id:
-        with console.status("[bold yellow]Finding matches..."):
+        with console.status("[bold yellow]Weekly mode: finding deeper matches..."):
             recs = recommender.match_project_to_repos(
                 project_id=project_id,
                 min_stars=min_stars,
-                limit=limit,
+                limit=per_project_limit,
             )
     else:
-        with console.status("[bold yellow]Running full matching pipeline..."):
+        with console.status("[bold yellow]Weekly mode: running full matching pipeline..."):
             result = recommender.run_full_pipeline(
                 min_stars=min_stars,
                 notify=notify,
                 score_threshold=threshold,
+                repo_embedding_limit=repo_embedding_limit,
+                per_project_limit=per_project_limit,
             )
-            console.print(f"[green]Embedded {result['repos_embedded']} repos, {result['projects_embedded']} projects[/green]")
+            console.print(
+                f"[green]Embedded {result['repos_embedded']} repos, "
+                f"{result['projects_embedded']} projects[/green]"
+            )
             console.print(f"[green]Generated {result['total_recommendations']} recommendations[/green]")
             if notify and result.get("notified_count", 0) > 0:
                 console.print(f"[cyan]Sent Slack notification for {result['notified_count']} high-score matches[/cyan]")
@@ -591,12 +626,12 @@ def match(
         console.print("[yellow]No matches found. Try lowering --min-stars[/yellow]")
         raise typer.Exit(0)
 
-    table = Table(title=":dart: Matching Repositories")
+    table = Table(title=":dart: Weekly Matching Recommendations")
     table.add_column("Score", style="green", width=6)
     table.add_column("Repository", style="cyan")
     table.add_column("Why?", style="yellow")
 
-    for r in recs:
+    for r in recs[:limit]:
         reasons_text = "; ".join([reason["text"] for reason in r.get("reasons", [])][:2])
         table.add_row(
             f"{r['score']:.2f}",
@@ -605,6 +640,55 @@ def match(
         )
 
     console.print(table)
+
+
+@app.command(name="weekly-match")
+def weekly_match(
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID to match"),
+    min_stars: int = typer.Option(50, "--min-stars", help="Minimum stars filter"),
+    limit: int = typer.Option(20, "--limit", "-n"),
+    notify: bool = typer.Option(False, "--notify", help="Send Slack notification for high-score matches"),
+    score_threshold: float | None = typer.Option(
+        None,
+        "--score-threshold",
+        help="Minimum score for notification (0.0-1.0)",
+    ),
+) -> None:
+    """Run thorough weekly project matching (secondary workflow)."""
+    console.print(
+        "[cyan]Weekly project matching:[/cyan] "
+        "this runs a deeper scan than daily curation."
+    )
+    _run_weekly_matching(
+        project_id=project_id,
+        min_stars=min_stars,
+        limit=limit,
+        notify=notify,
+        score_threshold=score_threshold,
+    )
+
+
+@app.command()
+def match(
+    project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID to match"),
+    min_stars: int = typer.Option(50, "--min-stars", help="Minimum stars filter"),
+    limit: int = typer.Option(20, "--limit", "-n"),
+    notify: bool = typer.Option(False, "--notify", help="Send Slack notification for high-score matches"),
+    score_threshold: float | None = typer.Option(
+        None,
+        "--score-threshold",
+        help="Minimum score for notification (0.0-1.0)",
+    ),
+) -> None:
+    """Compatibility alias for weekly project matching."""
+    console.print("[yellow]`gt match` now runs weekly recommendation mode. Use `gt weekly-match` going forward.[/yellow]")
+    _run_weekly_matching(
+        project_id=project_id,
+        min_stars=min_stars,
+        limit=limit,
+        notify=notify,
+        score_threshold=score_threshold,
+    )
 
 
 @app.command()
@@ -622,7 +706,7 @@ def recommendations(
 
     if not recs:
         console.print("[yellow]No recommendations yet.[/yellow]")
-        console.print("Run [cyan]gt match[/cyan] first to generate recommendations.")
+        console.print("Run [cyan]gt weekly-match[/cyan] first to generate recommendations.")
         raise typer.Exit(0)
 
     table = Table(title=":bulb: Smart Recommendations")
@@ -650,17 +734,17 @@ def _next_run_at(hour: int, minute: int) -> datetime:
     return target
 
 
-async def _run_sync_pipeline(
+async def _run_daily_digest_pipeline(
     *,
     language: str | None,
     analyze: bool,
-    notify: bool,
-    score_threshold: float,
-) -> None:
+    send_slack: bool,
+    save: bool = True,
+    limit: int = 10,
+) -> dict:
     from src.analyzer import analyze_repos
     from src.collector import fetch_trending
     from src.enricher import enrich_repos
-    from src.matcher import Recommender
     from src.notifier import SlackNotifier
     from src.storage import SupabaseStorage
 
@@ -668,6 +752,7 @@ async def _run_sync_pipeline(
         repos = await fetch_trending(language=language, since="daily")
 
     console.print(f"[green]Found {len(repos)} trending repos[/green]")
+    repos = repos[: max(limit * 3, 25)]
 
     with console.status("[bold blue]Enriching..."):
         enriched = await enrich_repos(repos)
@@ -675,74 +760,80 @@ async def _run_sync_pipeline(
     with console.status("[bold yellow]Analyzing..."):
         analyzed = await analyze_repos(enriched, skip_ai=not analyze)
 
-    with console.status("[bold magenta]Saving to database..."):
-        storage = SupabaseStorage()
-        snapshot_id = storage.save_snapshot(analyzed, language=language)
-        console.print(f"[green]Saved snapshot: {snapshot_id}[/green]")
+    curated = _curate_repos_for_digest(analyzed, limit=limit)
+    top_repos = _build_top_repo_payload(analyzed, limit=limit)
 
-    trending_summary = {
-        "language": language,
+    if save:
+        with console.status("[bold magenta]Saving to database..."):
+            storage = SupabaseStorage()
+            snapshot_id = storage.save_snapshot(analyzed, language=language)
+            console.print(f"[green]Saved snapshot: {snapshot_id}[/green]")
+
+    slack_sent = False
+    if send_slack:
+        notifier = SlackNotifier()
+        if not notifier.is_configured():
+            console.print("[yellow]Slack is not configured. Set SLACK_BOT_TOKEN and SLACK_CHANNEL_ID.[/yellow]")
+        elif notifier.notify_trending_summary(
+            total_repos=len(analyzed),
+            language=language,
+            top_repos=top_repos,
+        ):
+            slack_sent = True
+            console.print("[cyan]Sent daily curated digest to Slack[/cyan]")
+        else:
+            console.print("[yellow]Failed to send Slack digest.[/yellow]")
+
+    return {
         "total_repos": len(analyzed),
-        "top_repos": [
-            {
-                "full_name": repo.full_name,
-                "stars": repo.stars,
-                "stars_today": repo.stars_today,
-                "language": repo.language,
-            }
-            for repo in analyzed[:5]
-        ],
+        "curated_count": len(curated),
+        "slack_sent": slack_sent,
     }
 
-    with console.status("[bold cyan]Running matching pipeline..."):
-        recommender = Recommender()
-        result = recommender.run_full_pipeline(
-            notify=notify,
-            score_threshold=score_threshold,
-            trending_summary=trending_summary,
-        )
-        console.print(f"[green]Generated {result['total_recommendations']} recommendations[/green]")
-        if notify and result.get("notified_count", 0) > 0:
-            console.print(f"[cyan]Sent Slack notification for {result['notified_count']} high-score matches[/cyan]")
-        elif notify:
-            notifier = SlackNotifier()
-            if notifier.notify_trending_summary(
-                total_repos=trending_summary["total_repos"],
-                language=trending_summary["language"],
-                top_repos=trending_summary["top_repos"],
-            ):
-                console.print("[cyan]Sent daily Slack summary[/cyan]")
 
-    console.print("\n[bold green]:white_check_mark: Sync complete![/bold green]")
-    console.print("View recommendations: [cyan]gt recommendations[/cyan]")
-    console.print("Or visit the web UI: [cyan]http://localhost:3003[/cyan]")
+@app.command()
+def digest(
+    language: str | None = typer.Option(None, "--lang", "-l"),
+    analyze: bool = typer.Option(True, "--analyze/--no-analyze", "-a"),
+    limit: int = typer.Option(10, "--limit", "-n", help="Max curated repos to send"),
+    save: bool = typer.Option(True, "--save/--no-save", help="Save snapshot before sending"),
+) -> None:
+    """Send the daily curated Slack digest immediately."""
+    result = asyncio.run(
+        _run_daily_digest_pipeline(
+            language=language,
+            analyze=analyze,
+            send_slack=True,
+            save=save,
+            limit=limit,
+        )
+    )
+    console.print(
+        f"[bold green]:white_check_mark: Digest complete.[/bold green] "
+        f"Curated {result['curated_count']} repos from {result['total_repos']} trending repos."
+    )
 
 
 @app.command()
 def sync(
     language: str | None = typer.Option(None, "--lang", "-l"),
     analyze: bool = typer.Option(True, "--analyze/--no-analyze", "-a"),
-    notify: bool = typer.Option(False, "--notify", help="Send Slack notification for high-score matches"),
-    score_threshold: float | None = typer.Option(
-        None,
-        "--score-threshold",
-        help="Minimum score for notification (0.0-1.0)",
-    ),
+    notify: bool = typer.Option(False, "--notify", help="Send daily curated digest to Slack"),
+    limit: int = typer.Option(10, "--limit", "-n", help="Max curated repos in digest"),
 ) -> None:
-    """Full sync: fetch trending, analyze, save, and match."""
-    from src.config import get_settings
-
-    settings = get_settings()
-    threshold = score_threshold if score_threshold is not None else settings.slack_notify_threshold
-
-    asyncio.run(
-        _run_sync_pipeline(
+    """Daily sync: fetch trending, analyze, save, and optionally send digest."""
+    result = asyncio.run(
+        _run_daily_digest_pipeline(
             language=language,
             analyze=analyze,
-            notify=notify,
-            score_threshold=threshold,
+            send_slack=notify,
+            save=True,
+            limit=limit,
         )
     )
+    console.print("\n[bold green]:white_check_mark: Daily curation sync complete![/bold green]")
+    console.print(f"Curated {result['curated_count']} repos from {result['total_repos']} trending repos.")
+    console.print("Next: run [cyan]gt weekly-match[/cyan] for project matching.")
 
 
 @app.command()
@@ -751,25 +842,18 @@ def schedule(
     minute: int = typer.Option(0, "--minute", "-M", help="Local minute to run (0-59)"),
     language: str | None = typer.Option(None, "--lang", "-l"),
     analyze: bool = typer.Option(True, "--analyze/--no-analyze", "-a"),
-    notify: bool = typer.Option(True, "--notify/--no-notify", help="Send Slack notification"),
-    score_threshold: float | None = typer.Option(
-        None,
-        "--score-threshold",
-        help="Minimum score for notification (0.0-1.0)",
-    ),
+    notify: bool = typer.Option(True, "--notify/--no-notify", help="Send Slack digest"),
+    limit: int = typer.Option(10, "--limit", "-n", help="Max curated repos in digest"),
 ) -> None:
-    """Run daily sync at a fixed local time."""
-    from src.config import get_settings
+    """Run daily curation sync at a fixed local time."""
+    from src.notifier import SlackNotifier
 
     if not (0 <= hour <= 23 and 0 <= minute <= 59):
         console.print("[red]Invalid time. Use --hour 0-23 and --minute 0-59.[/red]")
         raise typer.Exit(1)
 
-    settings = get_settings()
-    threshold = score_threshold if score_threshold is not None else settings.slack_notify_threshold
-
     console.print(
-        f"[green]Scheduler started. Daily sync at {hour:02d}:{minute:02d} (local time).[/green]"
+        f"[green]Scheduler started. Daily curation sync at {hour:02d}:{minute:02d} (local time).[/green]"
     )
     console.print("[dim]Press Ctrl+C to stop.[/dim]")
 
@@ -781,25 +865,24 @@ def schedule(
             time.sleep(wait_seconds)
             try:
                 asyncio.run(
-                    _run_sync_pipeline(
+                    _run_daily_digest_pipeline(
                         language=language,
                         analyze=analyze,
-                        notify=notify,
-                        score_threshold=threshold,
+                        send_slack=notify,
+                        save=True,
+                        limit=limit,
                     )
                 )
             except Exception as exc:
-                console.print(f"[red]Scheduled sync failed: {exc}[/red]")
+                console.print(f"[red]Scheduled curation sync failed: {exc}[/red]")
                 if notify:
                     try:
-                        from src.notifier import SlackNotifier
-
                         notifier = SlackNotifier()
                         if notifier.is_configured():
                             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             error_text = str(exc)[:200] if str(exc) else "unknown error"
                             notifier.send_message(
-                                text=f"RepoFit daily sync failed at {timestamp}: {error_text}"
+                                text=f"RepoFit daily digest failed at {timestamp}: {error_text}"
                             )
                     except Exception as notify_exc:
                         console.print(f"[red]Slack failure notification failed: {notify_exc}[/red]")
@@ -857,7 +940,7 @@ def github_sync(
 
         console.print(table)
 
-    console.print("\nNext: run [cyan]gt match[/cyan] to find matching repos.")
+    console.print("\nNext: run [cyan]gt weekly-match[/cyan] to find matching repos.")
 
 
 @app.command(name="scan-projects")

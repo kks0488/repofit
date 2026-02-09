@@ -1,29 +1,20 @@
 # RepoFit
 
-AI-powered GitHub Trending analyzer that learns your projects, recommends repos that fit your stack, and generates monetization ideas.
+AI-curated GitHub trending digest - daily curation + weekly project matching
 
 ## Features
 
 ### Core Features
-- **Trending Scraper**: GitHub Trending (daily/weekly/monthly) with language filters
-- **GitHub Enrichment**: Topics, issues, license, and activity via GitHub API
-- **AI Scoring & Summaries**: OpenAI analysis with heuristic fallback when AI is disabled
-- **Project Profiles**: Register projects with stack, tags, and goals
-- **Smart Matching**: Two-stage matcher (pgvector similarity + stack overlap + quality)
-- **GitHub Search Discovery**: Find repos beyond trending using project-based queries
-- **Snapshots & History**: Save runs and track trending history over time
+- **Daily Trending Curation (Primary)**: AI-scored, category-grouped picks from GitHub Trending
+- **AI "Why it matters" Summaries**: One-line rationale per repo in Slack digest
+- **Rising Fast Signals**: Detects repos with unusually high `stars_today / total_stars`
+- **Weekly Project Matching (Secondary)**: Deeper project-to-repo matching pass
+- **Snapshots & History**: Save daily runs and track trend movement over time
 
-### Project Auto-Discovery (New!)
-- **GitHub Sync**: Sync your GitHub repos as projects automatically (`gt github-sync`)
-- **Folder Scanner**: Scan local projects folder for auto-registration (`gt scan-projects`)
-- **Stack Detection**: Auto-detect tech stack from package.json, pyproject.toml, README.md
-
-### Notifications & Slack Bot
-- **Slack Integration**: Rich Korean notifications for all features
-- **Daily Digest**: Trending + project matching summary
-- **Project Matches**: "This trending repo fits your project X"
+### Slack & Bot
+- **Slack Daily Digest**: Send curated top picks immediately with `gt digest`
+- **Weekly Match Alerts**: Optional Slack notifications for high-score weekly matches
 - **RAG-powered Bot**: AI answers using stored repo data (langchain + OpenAI)
-- **Slack Commands**: `스캔`, `추천`, `트렌딩` in channel → results as new message
 
 ## Architecture
 
@@ -83,8 +74,11 @@ gt project-add --name "MyApp" --stack "python,fastapi" --tags "api,web"
 # Or sync from GitHub
 gt github-sync
 
-# Get daily recommendations
-gt sync --notify
+# Send daily curated digest to Slack
+gt digest
+
+# Run deeper weekly project matching
+gt weekly-match
 ```
 
 ## CLI Commands
@@ -95,9 +89,10 @@ gt sync --notify
 |---------|-------------|
 | `gt init` | Create env files and validate Supabase schema |
 | `gt setup` | Validate configuration and show setup hints |
-| `gt quickstart` | Seed trending data and recommendations quickly |
-| `gt trending` | View trending repos |
-| `gt trending --analyze` | With AI analysis |
+| `gt quickstart` | Seed daily curation data quickly |
+| `gt` | Default command, same as `gt trending` |
+| `gt trending` | View daily curated trending repos |
+| `gt digest` | Send daily curated Slack digest immediately |
 | `gt inspect owner/repo` | Detailed repo analysis |
 | `gt history owner/repo` | Trending history for a repo |
 | `gt snapshots` | List saved trending snapshots |
@@ -111,8 +106,9 @@ gt sync --notify
 | `gt github-sync` | Sync your GitHub repos as projects |
 | `gt github-sync --starred` | Also show starred repos |
 | `gt scan-projects ~/projects` | Scan local folder for projects |
-| `gt match` | Find matching repos for all projects |
-| `gt match --project <id>` | Match a single project |
+| `gt weekly-match` | Thorough weekly matching for all projects |
+| `gt weekly-match --project <id>` | Weekly match for one project |
+| `gt match` | Compatibility alias for `gt weekly-match` |
 | `gt recommendations` | View AI recommendations |
 | `gt discover` | Discover GitHub repos that fit your projects |
 
@@ -120,14 +116,14 @@ gt sync --notify
 
 | Command | Description |
 |---------|-------------|
-| `gt sync` | Full pipeline (fetch → analyze → save → match) |
-| `gt sync --notify` | Full pipeline with daily digest to Slack |
-| `gt schedule` | Run daily sync at a fixed local time (default 19:00) |
+| `gt sync` | Daily curation sync (fetch → analyze → save) |
+| `gt sync --notify` | Daily curation sync + Slack digest |
+| `gt schedule` | Run daily curation sync at a fixed local time (default 19:00) |
 | `gt bot` | Start Slack auto-reply bot (requires Socket Mode) |
 
-## Smart Matching
+## Weekly Project Matching
 
-The recommendation engine uses a 2-stage approach across all stored repositories:
+`gt weekly-match` uses a 2-stage approach across stored repositories:
 
 1. **Stage 1 - Fast Filter**:
    - Tech stack overlap (languages, frameworks)
@@ -198,29 +194,31 @@ gt bot  # 봇 시작 (백그라운드로 실행 권장)
 ### Sample Daily Digest
 
 ```
-📊 오늘의 RepoFit 다이제스트
-🌐 Python • 📈 트렌딩 25개 분석
+📌 RepoFit Daily Trending Curation
+🌐 All languages • 10 picks from 25 trending repos
 ────────────────────────────
-🎯 프로젝트별 매칭 결과
-  MyApp: 5개 매칭 • 🔥 최고점 92% (owner/repo)
-  Backend: 3개 매칭 • ⭐ 최고점 85% (author/lib)
+*AI/ML*
+  owner/repo-a ⭐ 12,421 · +684 today ⚡ Rising fast
+  Why: High-velocity open-source agent framework with practical tooling.
 ────────────────────────────
-🏆 오늘의 TOP 추천
-  🔥 fastapi/fastapi → MyApp 92% 매칭
-  ⭐ langchain/langchain → Backend 85% 매칭
+*Frontend*
+  owner/repo-b ⭐ 8,130 · +311 today
+  Why: Solves real production UI performance bottlenecks.
 ────────────────────────────
-🚀 다음 단계
-  • gt recommendations - 전체 추천 보기
+Top 10 only: highest momentum + quality signals
 ```
 
 ### Daily Notifications
 
 ```bash
-# One-off run (send Slack summary + high-score matches)
-gt sync --notify
+# One-off run (send curated daily digest immediately)
+gt digest
 
 # Daily schedule at 19:00 local time (keep process running)
 gt schedule --hour 19 --minute 0 --notify
+
+# Weekly match run
+gt weekly-match --notify
 ```
 
 ## Environment Variables
@@ -264,10 +262,10 @@ To change the time, edit `~/.config/systemd/user/repofit-daily.timer` and update
 
 ```bash
 # Every day at 7 PM - full digest
-0 19 * * * cd /path/to/repofit && .venv/bin/gt sync --notify
+0 19 * * * cd /path/to/repofit && ./scripts/daily-digest.sh
 
-# Every day at 6 PM - run matching
-0 18 * * * cd /path/to/repofit && .venv/bin/gt match --notify
+# Every Monday at 9 AM - weekly project matching
+0 9 * * 1 cd /path/to/repofit && ./scripts/weekly-match.sh
 ```
 
 ### GitHub Actions
@@ -295,9 +293,9 @@ Use `.github/workflows/daily-sync.yml` with secrets:
 ## Troubleshooting
 
 - **Schema missing**: Run `schema.sql` in Supabase SQL Editor
-- **No recommendations**: Set `OPENAI_EMBEDDING_API_KEY`, then run `gt quickstart`
+- **No recommendations**: Set `OPENAI_EMBEDDING_API_KEY`, then run `gt weekly-match`
 - **Slack not working**: Check `SLACK_BOT_TOKEN` and `SLACK_CHANNEL_ID`
-- **No project matches**: Register projects with `gt project-add` first
+- **No project matches**: Register projects with `gt project-add` first, then run `gt weekly-match`
 - **GitHub sync fails**: Check `GITHUB_TOKEN` permissions (repo scope)
 
 ## License
