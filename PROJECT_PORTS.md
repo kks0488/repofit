@@ -19,5 +19,5 @@ Do not edit this section manually.
 - dev ports: disabled
 
 ## Refresh
-- Run: `python /home/kkaemo/project-registry/scripts/sync_projects.py`
+- Run: `python /home/kkaemo/projects/project-registry/scripts/sync_projects.py`
 <!-- PROJECT_REGISTRY_GUIDE_END -->
