@@ -53,3 +53,4 @@ Thumbs.db
 
 # Keep the web app source helpers (the Python "lib/" rule above would hide them)
 !web/src/lib/
+PROJECT_PORTS.md
