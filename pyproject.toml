@@ -5,7 +5,7 @@ description = "AI-powered GitHub Trending analyzer with project-fit recommendati
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "Your Name", email = "you@example.com" }]
+authors = [{ name = "Kyoungsoo Kim" }]
 keywords = ["github", "trending", "ai", "cli", "open-source"]
 
 dependencies = [
