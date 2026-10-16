@@ -118,7 +118,8 @@ async def analyze_single_repo(
             model=model_name,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
-            max_tokens=1024,
+            # Reasoning models share this budget with the final JSON response.
+            max_tokens=4096,
         )
         text = (response.choices[0].message.content or "").strip()
 
@@ -302,7 +303,7 @@ async def analyze_repos(
     skip_ai: bool = False,
     batch_size: int = 5,
 ) -> list[AnalyzedRepo]:
-    if skip_ai:
+    if skip_ai or not get_settings().openai_api_key:
         return [_enriched_to_analyzed(repo, _calculate_basic_scores(repo)) for repo in repos]
 
     settings = get_settings()

@@ -1,7 +1,7 @@
 import asyncio
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import typer
@@ -741,17 +741,22 @@ async def _run_daily_digest_pipeline(
     send_slack: bool,
     save: bool = True,
     limit: int = 10,
+    output: Path | None = None,
 ) -> dict:
     from src.analyzer import analyze_repos
     from src.collector import fetch_trending
+    from src.config import get_settings
     from src.enricher import enrich_repos
+    from src.models import TrendingSnapshot
     from src.notifier import SlackNotifier
-    from src.storage import SupabaseStorage
+    from src.storage import SupabaseStorage, save_file_snapshot
 
     with console.status("[bold green]Fetching trending..."):
         repos = await fetch_trending(language=language, since="daily")
 
     console.print(f"[green]Found {len(repos)} trending repos[/green]")
+    if not repos:
+        raise RuntimeError("No trending repositories found; refusing to save an empty snapshot.")
     repos = repos[: max(limit * 3, 25)]
 
     with console.status("[bold blue]Enriching..."):
@@ -763,8 +768,17 @@ async def _run_daily_digest_pipeline(
     curated = _curate_repos_for_digest(analyzed, limit=limit)
     top_repos = _build_top_repo_payload(analyzed, limit=limit)
 
+    settings = get_settings()
     if save:
-        with console.status("[bold magenta]Saving to database..."):
+        if output is not None or not (settings.supabase_url and settings.supabase_service_key):
+            output = output or Path("repofit-snapshot.json")
+            save_file_snapshot(
+                output,
+                TrendingSnapshot(collected_at=datetime.now(UTC), language=language, repositories=analyzed),
+                [repo.full_name for repo in curated],
+            )
+            console.print(f"[green]Saved JSON snapshot: {output}[/green]")
+        else:
             storage = SupabaseStorage()
             snapshot_id = storage.save_snapshot(analyzed, language=language)
             console.print(f"[green]Saved snapshot: {snapshot_id}[/green]")
@@ -820,6 +834,7 @@ def sync(
     analyze: bool = typer.Option(True, "--analyze/--no-analyze", "-a"),
     notify: bool = typer.Option(False, "--notify", help="Send daily curated digest to Slack"),
     limit: int = typer.Option(10, "--limit", "-n", help="Max curated repos in digest"),
+    output: Path | None = typer.Option(None, "--output", help="Save JSON instead of Supabase (automatic without database credentials)"),
 ) -> None:
     """Daily sync: fetch trending, analyze, save, and optionally send digest."""
     result = asyncio.run(
@@ -829,11 +844,13 @@ def sync(
             send_slack=notify,
             save=True,
             limit=limit,
+            output=output,
         )
     )
     console.print("\n[bold green]:white_check_mark: Daily curation sync complete![/bold green]")
     console.print(f"Curated {result['curated_count']} repos from {result['total_repos']} trending repos.")
-    console.print("Next: run [cyan]gt weekly-match[/cyan] for project matching.")
+    if output is None:
+        console.print("Use [cyan]gt need-search 'your need'[/cyan] to find repos for a specific task.")
 
 
 @app.command()
@@ -891,6 +908,33 @@ def schedule(
 
 
 # ==================== AUTO-DISCOVERY ====================
+
+@app.command(name="need-search")
+def need_search(
+    need: str = typer.Argument(..., help="Describe what you need in plain language"),
+) -> None:
+    """Find five popular, maintained repositories for a need (no AI key required)."""
+    import httpx
+
+    from src.collector.search import search_need
+
+    try:
+        repos = asyncio.run(search_need(need))
+    except (httpx.HTTPError, ValueError) as exc:
+        console.print(f"Need search failed: {exc}", markup=False)
+        raise typer.Exit(1) from exc
+    console.print(f"Need: {need}", markup=False, soft_wrap=True)
+    console.print("Filters: stars >= 300; pushed in the last 6 months; not archived or forks.")
+    if not repos:
+        console.print("No repositories met the filters. Try a shorter product/task description.")
+    for rank, repo in enumerate(repos, 1):
+        console.print(
+            f"{rank}. {repo['full_name']} | {repo['stars']:,} stars | "
+            f"pushed {repo['pushed_at'][:10]} | {repo['license']}\n"
+            f"   {repo['url']}\n   Fit: {repo['fit']}",
+            markup=False, soft_wrap=True,
+        )
+
 
 @app.command(name="github-sync")
 def github_sync(

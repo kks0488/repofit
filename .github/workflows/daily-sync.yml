@@ -5,21 +5,22 @@ on:
     - cron: "0 0 * * *" # 09:00 KST
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-repofit-sync
+  cancel-in-progress: false
+
 jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
-      OPENAI_MODEL: ${{ secrets.OPENAI_MODEL || 'gpt-5.2' }}
+      OPENAI_API_KEY: ${{ secrets.NEBIUS_API_KEY || secrets.OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || secrets.OPENAI_BASE_URL || (secrets.NEBIUS_API_KEY && 'https://api.tokenfactory.nebius.com/v1') || 'https://api.openai.com/v1' }}
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL || secrets.OPENAI_MODEL || (secrets.NEBIUS_API_KEY && 'nvidia/Nemotron-3_5-Lightning') || 'gpt-5.2' }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-      SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
-      SLACK_NOTIFY_THRESHOLD: "0.7"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,4 +37,36 @@ jobs:
 
       - name: Run daily sync
         run: |
-          gt sync --notify
+          if [ -n "$OPENAI_API_KEY" ]; then
+            gt sync --output repofit-snapshot.json
+          else
+            gt sync --no-analyze --output repofit-snapshot.json
+          fi
+
+      - name: Upload daily snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: repofit-daily-${{ github.run_id }}
+          path: repofit-snapshot.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Show curated digest
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          with open('repofit-snapshot.json', encoding='utf-8') as stream:
+              snapshot = json.load(stream)
+          by_name = {repo['full_name']: repo for repo in snapshot['repositories']}
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write('# RepoFit daily picks\n\n')
+              summary.write(f"Collected {len(by_name)} repositories at {snapshot['collected_at']}. "
+                            'Download the JSON artifact on this run for the full snapshot (90 days).\n\n')
+              for name in snapshot['curated_repositories']:
+                  repo = by_name[name]
+                  text = (repo['summary'] or repo['description'] or 'No description').replace('\n', ' ')
+                  summary.write(f"- [{name}]({repo['url']}) — {repo['stars']:,} stars "
+                                f"(+{repo['stars_today']:,} today): {text}\n")
+          PY

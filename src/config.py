@@ -11,9 +11,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    supabase_url: str
-    supabase_anon_key: str
-    supabase_service_key: str
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+    supabase_service_key: str = ""
 
     openai_api_key: str = ""
     openai_base_url: str = "http://localhost:8317/v1"

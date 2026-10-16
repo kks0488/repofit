@@ -63,14 +63,38 @@ pip install -e .
 
 ## Quick start
 
+**[Read daily picks and download the latest JSON snapshot](https://github.com/kks0488/repofit/actions/workflows/daily-sync.yml)** — open the latest successful run; no local server is needed.
+
 See today's curated Trending without any database or AI key (a `GITHUB_TOKEN` is optional and only raises the API rate limit):
 
 ```bash
-export SUPABASE_URL=https://example.supabase.co SUPABASE_ANON_KEY=x SUPABASE_SERVICE_KEY=x  # placeholders; not used by this command
 gt trending --no-analyze -n 10
 ```
 
-The full pipeline needs Supabase (Postgres + pgvector) and an OpenAI-compatible API:
+Save a daily snapshot without a database or paid service:
+
+```bash
+gt sync --no-analyze                       # writes repofit-snapshot.json
+gt sync --no-analyze --output /tmp/picks.json
+```
+
+`gt sync` automatically uses JSON when database credentials are absent. `--output` always
+selects JSON, even if Supabase is configured. Without an AI key, analysis automatically
+uses the existing activity/popularity scoring; `--no-analyze` explicitly skips the model.
+The JSON contains all collected repositories, summaries/metadata, and the ranked top picks.
+
+For AI summaries, configure any OpenAI-compatible endpoint. Nebius Token Factory example:
+
+```bash
+export OPENAI_API_KEY="$(security find-generic-password -s nebius-token-factory -a kks0488 -w)"
+export OPENAI_BASE_URL=https://api.tokenfactory.nebius.com/v1
+export OPENAI_MODEL=nvidia/Nemotron-3_5-Lightning
+gt sync --output repofit-snapshot.json
+```
+
+An existing API key may consume provider credits; the no-key path requires no AI service.
+Never commit keys or `.env` files. JSON snapshots contain repository data only.
+Supabase (Postgres + pgvector) remains optional for the web UI, project registry and weekly embedding matches:
 
 ```bash
 cp .env.example .env        # fill in Supabase, OpenAI and (optionally) Slack values
@@ -82,6 +106,65 @@ gt github-sync              # or import your GitHub repos as projects
 
 gt digest                   # send today's curated digest to Slack
 gt weekly-match             # match stored repos to your projects
+```
+
+## Search by need
+
+```bash
+gt need-search "automate gemini.google.com from scripts without API"
+gt need-search "bulk image generation via Google Flow web"
+```
+
+No AI key or database is needed. Authentication uses `GITHUB_TOKEN`, `GH_TOKEN`, or your
+existing `gh auth login` session; unauthenticated requests also work within GitHub's lower
+rate limits. The command expands the need into bounded GitHub repository/README searches,
+requires **at least 300 stars**, a push within **six calendar months**, and excludes forks
+and archived repos. It deduplicates candidates and ranks documented task fit before star
+count, with a small popularity tie-breaker. It fetches at most 20 READMEs per search.
+Up to five matches include stars, last push, license and a one-line fit excerpt; `UNKNOWN`
+means GitHub did not report a license. Results show documented fit, not a tested integration;
+candidate tools may require a signed-in browser, cookies or an existing provider plan.
+
+Real command output captured on **2026-10-16** (stars and results change over time):
+
+```text
+$ gt need-search "automate gemini.google.com from scripts without API"
+Need: automate gemini.google.com from scripts without API
+Filters: stars >= 300; pushed in the last 6 months; not archived or forks.
+1. zexadev/gemini-web2api-go | 615 stars | pushed 2026-10-14 | MIT
+   https://github.com/zexadev/gemini-web2api-go
+   Fit: Gemini web → OpenAI-compatible API, self-hosted, no API key. Reverse-proxies gemini.google.com into /v1/chat/completions: single Go binary, Chrome TLS fingerprint, cookie pool with auto-renewal, proxy pool, adm…
+2. ntthanh2603/gemini-web-to-api | 588 stars | pushed 2026-10-16 | MIT
+   https://github.com/ntthanh2603/gemini-web-to-api
+   Fit: ✨Reverse-engineered API for Gemini web app. It can be used as a genuine API key from OpenAI, Gemini, and Claude.
+3. Sophomoresty/gemini-web2api | 3,458 stars | pushed 2026-08-14 | MIT
+   https://github.com/Sophomoresty/gemini-web2api
+   Fit: Convert Google Gemini web into OpenAI-compatible API. Zero auth, cross-platform, single file.
+4. HanaokaYuzu/Gemini-API | 3,600 stars | pushed 2026-10-08 | AGPL-3.0
+   https://github.com/HanaokaYuzu/Gemini-API
+   Fit: ✨ Reverse-engineered Python API for Google Gemini web app
+5. yeahhe365/Gemini-Nexus | 1,123 stars | pushed 2026-10-14 | MIT
+   https://github.com/yeahhe365/Gemini-Nexus
+   Fit: Gemini Nexus 是一款面向浏览器场景的 AI 助手扩展，集成 Gemini Web、Gemini API 与 OpenAI 兼容接口，支持网页上下文、图像处理、工具调用和 MCP 浏览器控制。
+
+$ gt need-search "bulk image generation via Google Flow web"
+Need: bulk image generation via Google Flow web
+Filters: stars >= 300; pushed in the last 6 months; not archived or forks.
+1. crisng95/flowkit | 1,005 stars | pushed 2026-10-06 | MIT
+   https://github.com/crisng95/flowkit
+   Fit: README: image generation, 2K image export, and image-to-video all run green. Upgrading
+2. crisng95/flowboard | 472 stars | pushed 2026-10-02 | UNKNOWN
+   https://github.com/crisng95/flowboard
+   Fit: README: wiring nodes together, image generation and Veo 3.1 image-to-video through
+3. TheSmallHanCat/flow2api | 3,048 stars | pushed 2026-10-12 | MIT
+   https://github.com/TheSmallHanCat/flow2api
+   Fit: README: - 按分类浏览所有可用模型（图片生成、文/图生视频、多图视频、视频放大等）
+4. lakysir/fpbrowser2api | 313 stars | pushed 2026-09-12 | UNKNOWN
+   https://github.com/lakysir/fpbrowser2api
+   Fit: README: | Google Flow / Veo | veo_workflow | Veo 3.1、Veo Omni Flash、Nana Banana 2/Pro 图片生成 |
+5. foxhui/WebAI2API | 1,391 stars | pushed 2026-07-10 | MIT
+   https://github.com/foxhui/WebAI2API
+   Fit: README: WebAI2API 是一个基于 Camoufox (Playwright) 的网页版 AI 服务转通用 API 的工具。通过模拟人类操作与 LMArena、Gemini 等网站交互, 提供兼容 OpenAI 格式 的接口服务, 同时支持 多窗口并发 与 多账号管理(浏览器实例数据隔离)。
 ```
 
 ## Demo
@@ -96,7 +179,8 @@ A real run of `gt trending --no-analyze` (October 2026) and the test suite:
 flowchart LR
     A[GitHub Trending<br/>scraper] --> B[GitHub API<br/>enrich]
     B --> C[AI analysis<br/>optional]
-    C --> D[(Supabase<br/>+ pgvector)]
+    C --> J[JSON snapshot<br/>Actions artifact + daily picks]
+    C --> D[(Optional Supabase<br/>+ pgvector)]
     D --> E[gt digest<br/>Slack]
     D --> F[gt weekly-match<br/>embeddings]
     G[Your projects<br/>manual · GitHub · folder scan] --> F
@@ -110,10 +194,10 @@ flowchart LR
 ## FAQ
 
 **Do I need OpenAI?**
-Not for browsing. `gt trending --no-analyze` uses only GitHub. AI summaries and project matching need an OpenAI-compatible endpoint; matching also needs `OPENAI_EMBEDDING_API_KEY`.
+No AI service is required for `gt trending --no-analyze`, `gt sync --no-analyze`, or `gt need-search`. AI summaries use an optional OpenAI-compatible endpoint; embedding-based project matching also needs `OPENAI_EMBEDDING_API_KEY` and Supabase.
 
 **Why Supabase?**
-Snapshots, history, projects and embeddings are stored there. Run `schema.sql` in the Supabase SQL editor once; all tables use a `gt_` prefix.
+It is optional for daily sync and need search. The web UI, project registry, database history and weekly embedding matches still use it. Run `schema.sql` in the Supabase SQL editor once for those features; all tables use a `gt_` prefix.
 
 **Can it run on a schedule?**
 Yes: `gt schedule` (long-running), the systemd timer in `scripts/`, cron, or the GitHub Actions workflow. See Technical details below.
@@ -148,8 +232,9 @@ Yes: `gt schedule` (long-running), the systemd timer in `scripts/`, cron, or the
 | `gt weekly-match` | Thorough weekly matching for all projects (`--project <id>` for one) |
 | `gt match` | Compatibility alias for `gt weekly-match` |
 | `gt recommendations` | View AI recommendations |
+| `gt need-search "your need"` | Search GitHub for up to five popular, maintained repos; no database or AI key |
 | `gt discover` | Search GitHub for repos that fit your projects |
-| `gt sync` | Daily curation sync (fetch → analyze → save); `--notify` also sends the digest |
+| `gt sync` | Daily curation sync; `--output path.json` selects a file, automatic JSON without database credentials; `--no-analyze` skips AI; `--notify` optionally sends Slack |
 | `gt schedule` | Run the daily sync at a fixed local time (default 19:00) |
 | `gt bot` | Start the Slack auto-reply bot (Socket Mode) |
 
@@ -227,7 +312,34 @@ Cron:
 0 9 * * 1 cd /path/to/repofit && ./scripts/weekly-match.sh    # Monday weekly match
 ```
 
-GitHub Actions: `.github/workflows/daily-sync.yml` runs `gt sync --notify` daily. Add repository secrets `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_KEY`, `OPENAI_API_KEY`, `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` (and optionally `OPENAI_BASE_URL`, `OPENAI_MODEL`).
+GitHub Actions: [Daily RepoFit Sync](https://github.com/kks0488/repofit/actions/workflows/daily-sync.yml)
+runs daily at 00:00 UTC (09:00 KST; GitHub may delay scheduled jobs). No server, database,
+Slack setup or external paid service is required. Open the latest successful run to read
+**RepoFit daily picks** in its job summary, or download its `repofit-daily-<run ID>` JSON artifact.
+Each run retains its snapshot for 90 days; artifacts do not feed the optional Supabase web UI.
+
+For optional AI summaries, add the repository secret `NEBIUS_API_KEY`; this selects
+`https://api.tokenfactory.nebius.com/v1` and `nvidia/Nemotron-3_5-Lightning` by default.
+On the owner's Mac, transfer the existing key without printing or saving it:
+
+```bash
+set -o pipefail
+security find-generic-password -s nebius-token-factory -a kks0488 -w | gh secret set NEBIUS_API_KEY -R kks0488/repofit
+```
+
+Alternatively use `OPENAI_API_KEY`. Repository variables `OPENAI_BASE_URL` and `OPENAI_MODEL`
+(or the existing secrets of those names) override provider defaults. With neither key,
+the workflow explicitly runs `--no-analyze`. Trigger it manually with:
+
+```bash
+gh workflow run daily-sync.yml -R kks0488/repofit
+```
+
+The October failure log showed a removed `selectolax.parser` backend after an unbounded
+upgrade to selectolax 1.0; the scraper now uses its supported Lexbor backend. The workflow
+also had empty Supabase/AI secrets and required a database; daily JSON/artifact storage
+removes that dependency. April run logs have expired (GitHub returns HTTP 410), so their
+exact traceback cannot be recovered.
 
 ### Web UI
 
