@@ -36,6 +36,48 @@ class SupabaseStorage:
             repo_data["first_seen_at"] = repo.created_at.isoformat()
         return repo_data
 
+    def _release_stale_full_names(self, rows_with_github_id: list[dict]) -> None:
+        """Free full_names held by a different repo so a github_id upsert cannot hit full_name UNIQUE.
+
+        github_id is the stable GitHub identity; full_name changes on rename/transfer and can be reused.
+        """
+        full_names = [row["full_name"] for row in rows_with_github_id]
+        github_ids = [row["github_id"] for row in rows_with_github_id]
+        by_name = {
+            row["full_name"]: row
+            for row in self._client.table("gt_repositories")
+            .select("id, github_id, full_name")
+            .in_("full_name", full_names)
+            .execute()
+            .data
+            or []
+        }
+        existing_ids = {
+            row["github_id"]
+            for row in self._client.table("gt_repositories")
+            .select("id, github_id")
+            .in_("github_id", github_ids)
+            .execute()
+            .data
+            or []
+        }
+
+        for row in rows_with_github_id:
+            holder = by_name.get(row["full_name"])
+            if not holder or holder.get("github_id") == row["github_id"]:
+                continue
+            if holder.get("github_id") is None and row["github_id"] not in existing_ids:
+                # Legacy row without github_id: adopt it instead of creating a duplicate.
+                self._client.table("gt_repositories").update(
+                    {"github_id": row["github_id"]}
+                ).eq("id", holder["id"]).execute()
+                existing_ids.add(row["github_id"])
+            else:
+                # Name now belongs to another GitHub repo; keep the old row but move it aside.
+                self._client.table("gt_repositories").update(
+                    {"full_name": f"{row['full_name']}#stale-{holder['id']}"}
+                ).eq("id", holder["id"]).execute()
+
     def _upsert_repository_rows(
         self,
         repos: list[AnalyzedRepo],
@@ -44,14 +86,37 @@ class SupabaseStorage:
         if not repos:
             return {}
 
-        repository_rows = [self._build_repository_row(repo, updated_at) for repo in repos]
-        upserted = (
-            self._client.table("gt_repositories")
-            .upsert(repository_rows, on_conflict="full_name")
-            .execute()
-            .data
-            or []
-        )
+        # One row per full_name and per github_id; ON CONFLICT cannot touch a row twice in one statement.
+        rows_by_name: dict[str, dict] = {}
+        for repo in repos:
+            rows_by_name[repo.full_name] = self._build_repository_row(repo, updated_at)
+        rows_by_github_id: dict[int, dict] = {}
+        rows_without_github_id: list[dict] = []
+        for row in rows_by_name.values():
+            if row.get("github_id") is None:
+                rows_without_github_id.append(row)
+            else:
+                rows_by_github_id[row["github_id"]] = row
+        rows_with_github_id = list(rows_by_github_id.values())
+
+        upserted: list[dict] = []
+        if rows_with_github_id:
+            self._release_stale_full_names(rows_with_github_id)
+            upserted += (
+                self._client.table("gt_repositories")
+                .upsert(rows_with_github_id, on_conflict="github_id")
+                .execute()
+                .data
+                or []
+            )
+        if rows_without_github_id:
+            upserted += (
+                self._client.table("gt_repositories")
+                .upsert(rows_without_github_id, on_conflict="full_name")
+                .execute()
+                .data
+                or []
+            )
 
         repo_id_by_full_name = {
             row["full_name"]: row["id"]
