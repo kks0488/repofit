@@ -15,8 +15,8 @@ class Recommender:
     def __init__(self) -> None:
         self.storage = SupabaseStorage()
 
+    @staticmethod
     def _calculate_stack_overlap(
-        self,
         project_stack: list[str],
         project_tags: list[str],
         repo_language: str | None,

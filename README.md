@@ -9,7 +9,7 @@
 <h2 align="center">Stop scrolling GitHub Trending.<br>Get the repos that fit what you're building.</h2>
 
 <p align="center">
-  repofit collects GitHub Trending every day, scores each repo, and sends a short curated digest to Slack.<br>
+  repofit collects GitHub Trending every day, commits a short Markdown digest, and shows a macOS notification.<br>
   Once a week it matches stored repos against your own projects using embeddings and stack overlap.
 </p>
 
@@ -44,8 +44,8 @@ Register projects by hand, sync them from your GitHub account, or scan a local f
 </td>
 <td width="50%" valign="top">
 
-### Slack digest and bot
-`gt digest` posts the curated picks with a "Rising fast" badge. An optional Socket Mode bot answers questions from the stored repo data (RAG with langchain).
+### Daily digest and Mac notification
+`gt digest` writes `digests/YYYY-MM-DD.md` with top picks, why they matter, and project matches. Slack delivery and the Socket Mode bot remain optional; sending is off by default.
 
 </td>
 </tr>
@@ -63,7 +63,7 @@ pip install -e .
 
 ## Quick start
 
-**[Read daily picks and download the latest JSON snapshot](https://github.com/kks0488/repofit/actions/workflows/daily-sync.yml)** — open the latest successful run; no local server is needed.
+**[Read the daily Markdown digests](https://github.com/kks0488/repofit/tree/main/digests)** — no local server is needed. JSON snapshots also remain available in the [daily workflow](https://github.com/kks0488/repofit/actions/workflows/daily-sync.yml).
 
 See today's curated Trending without any database or AI key (a `GITHUB_TOKEN` is optional and only raises the API rate limit):
 
@@ -76,6 +76,7 @@ Save a daily snapshot without a database or paid service:
 ```bash
 gt sync --no-analyze                       # writes repofit-snapshot.json
 gt sync --no-analyze --output /tmp/picks.json
+gt digest --no-analyze                    # writes digests/YYYY-MM-DD.md with project matches
 ```
 
 `gt sync` automatically uses JSON when database credentials are absent. `--output` always
@@ -104,7 +105,7 @@ gt quickstart               # seeds the first curated snapshot
 gt project-add --name "MyApp" --stack "python,fastapi" --tags "api,web"
 gt github-sync              # or import your GitHub repos as projects
 
-gt digest                   # send today's curated digest to Slack
+gt digest                   # write digests/YYYY-MM-DD.md (add --notify for Slack)
 gt weekly-match             # match stored repos to your projects
 ```
 
@@ -179,9 +180,9 @@ A real run of `gt trending --no-analyze` (October 2026) and the test suite:
 flowchart LR
     A[GitHub Trending<br/>scraper] --> B[GitHub API<br/>enrich]
     B --> C[AI analysis<br/>optional]
-    C --> J[JSON snapshot<br/>Actions artifact + daily picks]
+    C --> J[Daily Markdown digest<br/>git commit + Mac notification]
     C --> D[(Optional Supabase<br/>+ pgvector)]
-    D --> E[gt digest<br/>Slack]
+    D --> E[Optional Slack<br/>--notify]
     D --> F[gt weekly-match<br/>embeddings]
     G[Your projects<br/>manual · GitHub · folder scan] --> F
     D --> H[Next.js web UI]
@@ -221,7 +222,7 @@ Yes: `gt schedule` (long-running), the systemd timer in `scripts/`, cron, or the
 | `gt setup` | Validate configuration and show setup hints |
 | `gt quickstart` | Seed daily curation data quickly |
 | `gt` / `gt trending` | View daily curated trending repos (`--lang`, `--since`, `-n`, `--no-enrich`, `--no-analyze`, `--save`) |
-| `gt digest` | Send the daily curated Slack digest immediately |
+| `gt digest` | Write today's Markdown digest with project matches; `--notify` opts into Slack |
 | `gt inspect owner/repo` | Detailed repo analysis |
 | `gt history owner/repo` | Trending history for a repo |
 | `gt snapshots` | List saved trending snapshots |
@@ -264,7 +265,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 
 If `OPENAI_BASE_URL` is not set, the code defaults to a local OpenAI-compatible proxy (`http://localhost:8317/v1`), so set it explicitly when using the OpenAI API.
 
-### Slack setup
+### Slack setup (optional, off by default)
 
 1. Create a Slack app at [api.slack.com/apps](https://api.slack.com/apps). Bot token scopes: `chat:write`, `channels:read`, `channels:history`. Install it and copy the `xoxb-` token, then `/invite @YourBot` in your channel.
 2. For the bot: enable Socket Mode, create an app-level token with `connections:write` (`xapp-`), enable events and subscribe to `message.channels` and `app_mention`.
@@ -313,10 +314,18 @@ Cron:
 ```
 
 GitHub Actions: [Daily RepoFit Sync](https://github.com/kks0488/repofit/actions/workflows/daily-sync.yml)
-runs daily at 00:00 UTC (09:00 KST; GitHub may delay scheduled jobs). No server, database,
-Slack setup or external paid service is required. Open the latest successful run to read
-**RepoFit daily picks** in its job summary, or download its `repofit-daily-<run ID>` JSON artifact.
-Each run retains its snapshot for 90 days; artifacts do not feed the optional Supabase web UI.
+runs daily at 22:17 UTC (07:17 KST the next day; GitHub may delay scheduled jobs) and commits
+`digests/YYYY-MM-DD.md` using the KST date. Each digest contains top picks, **why it matters**,
+and up to three matches per pick against the owner's public, active, non-fork GitHub projects.
+Matches use the existing language/topic overlap rule; they are candidates, not tested integrations.
+No database or Slack setup is needed. JSON and Markdown artifacts are also retained for 90 days.
+
+On the owner's Mac, `~/Library/LaunchAgents/com.kks.repofit-notify.plist` runs
+`scripts/repofit-notify.sh` daily at **08:07 local time**. It pulls `main` with `--ff-only`
+and shows the top three repo names under **repofit 오늘의 오픈소스**. If today's digest is
+delayed, the notification labels the latest available digest's date. Run the script manually
+to test it; notification banners follow macOS notification settings. Slack sends only with
+`gt digest --notify`, `gt sync --notify`, or an explicitly started `gt bot`.
 
 For optional AI summaries, add the repository secret `NEBIUS_API_KEY`; this selects
 `https://api.tokenfactory.nebius.com/v1` and `nvidia/Nemotron-3_5-Lightning` by default.
@@ -360,7 +369,7 @@ Pages: latest trending, your projects (add / list), and recommendations, all rea
 | Database | Supabase (PostgreSQL + pgvector) |
 | Frontend | Next.js 16, React 19, Tailwind CSS 4, TanStack Query |
 | HTTP / scraping | httpx (async), selectolax |
-| Notifications | Slack Block Kit, slack-bolt (Socket Mode) |
+| Delivery | Daily Markdown commit, macOS notification; optional Slack |
 
 ### Tests
 

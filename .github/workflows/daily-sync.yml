@@ -2,11 +2,11 @@ name: Daily RepoFit Sync
 
 on:
   schedule:
-    - cron: "0 0 * * *" # 09:00 KST
+    - cron: "17 22 * * *" # 07:17 KST; before the Mac's 08:07 notification
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: daily-repofit-sync
@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
+      TZ: Asia/Seoul
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       OPENAI_API_KEY: ${{ secrets.NEBIUS_API_KEY || secrets.OPENAI_API_KEY }}
       OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || secrets.OPENAI_BASE_URL || (secrets.NEBIUS_API_KEY && 'https://api.tokenfactory.nebius.com/v1') || 'https://api.openai.com/v1' }}
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL || secrets.OPENAI_MODEL || (secrets.NEBIUS_API_KEY && 'nvidia/Nemotron-3_5-Lightning') || 'gpt-5.2' }}
@@ -24,6 +26,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -38,35 +42,38 @@ jobs:
       - name: Run daily sync
         run: |
           if [ -n "$OPENAI_API_KEY" ]; then
-            gt sync --output repofit-snapshot.json
+            gt sync --output repofit-snapshot.json --digest-dir digests --project-owner "$GITHUB_REPOSITORY_OWNER"
           else
-            gt sync --no-analyze --output repofit-snapshot.json
+            gt sync --no-analyze --output repofit-snapshot.json --digest-dir digests --project-owner "$GITHUB_REPOSITORY_OWNER"
+          fi
+
+      - name: Commit daily Markdown digest
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- digests/*.md
+          if ! git diff --cached --quiet; then
+            git commit -m "docs: daily repofit digest $(date +%F)"
+            git pull --rebase origin "$DEFAULT_BRANCH"
+            git push origin "HEAD:$DEFAULT_BRANCH"
           fi
 
       - name: Upload daily snapshot
         uses: actions/upload-artifact@v4
         with:
           name: repofit-daily-${{ github.run_id }}
-          path: repofit-snapshot.json
+          path: |
+            repofit-snapshot.json
+            digests/*.md
           if-no-files-found: error
           retention-days: 90
 
       - name: Show curated digest
         run: |
           python - <<'PY'
-          import json
           import os
+          from pathlib import Path
 
-          with open('repofit-snapshot.json', encoding='utf-8') as stream:
-              snapshot = json.load(stream)
-          by_name = {repo['full_name']: repo for repo in snapshot['repositories']}
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
-              summary.write('# RepoFit daily picks\n\n')
-              summary.write(f"Collected {len(by_name)} repositories at {snapshot['collected_at']}. "
-                            'Download the JSON artifact on this run for the full snapshot (90 days).\n\n')
-              for name in snapshot['curated_repositories']:
-                  repo = by_name[name]
-                  text = (repo['summary'] or repo['description'] or 'No description').replace('\n', ' ')
-                  summary.write(f"- [{name}]({repo['url']}) — {repo['stars']:,} stars "
-                                f"(+{repo['stars_today']:,} today): {text}\n")
+              summary.write(max(Path('digests').glob('????-??-??.md')).read_text(encoding='utf-8'))
           PY

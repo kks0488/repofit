@@ -393,7 +393,7 @@ def quickstart(
             snapshot_id = storage.save_snapshot(analyzed, language=language)
             console.print(f"[green]Saved snapshot: {snapshot_id}[/green]")
 
-        console.print("Next steps: `gt digest` for Slack curation or `gt weekly-match` for project matching")
+        console.print("Next steps: `gt digest` for Markdown picks or `gt weekly-match` for project matching")
 
     asyncio.run(run())
 
@@ -742,6 +742,8 @@ async def _run_daily_digest_pipeline(
     save: bool = True,
     limit: int = 10,
     output: Path | None = None,
+    digest_dir: Path | None = None,
+    project_owner: str = "kks0488",
 ) -> dict:
     from src.analyzer import analyze_repos
     from src.collector import fetch_trending
@@ -784,6 +786,13 @@ async def _run_daily_digest_pipeline(
             console.print(f"[green]Saved snapshot: {snapshot_id}[/green]")
 
     slack_sent = False
+    if digest_dir is not None:
+        from src.reporter.markdown import fetch_public_projects, write_markdown_digest
+
+        projects = await fetch_public_projects(project_owner)
+        path = write_markdown_digest(digest_dir, curated, projects, total_repos=len(analyzed))
+        console.print(f"[green]Saved Markdown digest: {path}[/green]")
+
     if send_slack:
         notifier = SlackNotifier()
         if not notifier.is_configured():
@@ -809,17 +818,22 @@ async def _run_daily_digest_pipeline(
 def digest(
     language: str | None = typer.Option(None, "--lang", "-l"),
     analyze: bool = typer.Option(True, "--analyze/--no-analyze", "-a"),
-    limit: int = typer.Option(10, "--limit", "-n", help="Max curated repos to send"),
+    limit: int = typer.Option(10, "--limit", "-n", min=1, help="Max curated repos to include"),
     save: bool = typer.Option(True, "--save/--no-save", help="Save snapshot before sending"),
+    notify: bool = typer.Option(False, "--notify", help="Also send to Slack (off by default)"),
+    digest_dir: Path = typer.Option(Path("digests"), "--digest-dir"),
+    project_owner: str = typer.Option("kks0488", "--project-owner", help="Public GitHub projects to match"),
 ) -> None:
-    """Send the daily curated Slack digest immediately."""
+    """Write today's Markdown digest with project matches; Slack is opt-in."""
     result = asyncio.run(
         _run_daily_digest_pipeline(
             language=language,
             analyze=analyze,
-            send_slack=True,
+            send_slack=notify,
             save=save,
             limit=limit,
+            digest_dir=digest_dir,
+            project_owner=project_owner,
         )
     )
     console.print(
@@ -835,6 +849,8 @@ def sync(
     notify: bool = typer.Option(False, "--notify", help="Send daily curated digest to Slack"),
     limit: int = typer.Option(10, "--limit", "-n", help="Max curated repos in digest"),
     output: Path | None = typer.Option(None, "--output", help="Save JSON instead of Supabase (automatic without database credentials)"),
+    digest_dir: Path | None = typer.Option(None, "--digest-dir", help="Also write a dated Markdown digest"),
+    project_owner: str = typer.Option("kks0488", "--project-owner"),
 ) -> None:
     """Daily sync: fetch trending, analyze, save, and optionally send digest."""
     result = asyncio.run(
@@ -845,6 +861,8 @@ def sync(
             save=True,
             limit=limit,
             output=output,
+            digest_dir=digest_dir,
+            project_owner=project_owner,
         )
     )
     console.print("\n[bold green]:white_check_mark: Daily curation sync complete![/bold green]")
@@ -859,7 +877,7 @@ def schedule(
     minute: int = typer.Option(0, "--minute", "-M", help="Local minute to run (0-59)"),
     language: str | None = typer.Option(None, "--lang", "-l"),
     analyze: bool = typer.Option(True, "--analyze/--no-analyze", "-a"),
-    notify: bool = typer.Option(True, "--notify/--no-notify", help="Send Slack digest"),
+    notify: bool = typer.Option(False, "--notify/--no-notify", help="Send Slack digest (off by default)"),
     limit: int = typer.Option(10, "--limit", "-n", help="Max curated repos in digest"),
 ) -> None:
     """Run daily curation sync at a fixed local time."""
@@ -888,6 +906,7 @@ def schedule(
                         send_slack=notify,
                         save=True,
                         limit=limit,
+                        digest_dir=Path("digests"),
                     )
                 )
             except Exception as exc:
