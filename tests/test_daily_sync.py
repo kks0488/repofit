@@ -102,6 +102,8 @@ def test_digest_command_writes_matches_without_slack_or_database(monkeypatch, tm
         assert owner == "kks0488"
         return [
             {"name": "kks0488/repofit", "tech_stack": ["python"], "tags": ["automation"]},
+            {"name": "kks0488/language-only", "tech_stack": ["python"], "tags": ["video"]},
+            {"name": "kks0488/topic-only", "tech_stack": ["rust"], "tags": ["Automation"]},
             {"name": "kks0488/game", "tech_stack": ["c#"], "tags": ["game"]},
         ]
 
@@ -116,6 +118,8 @@ def test_digest_command_writes_matches_without_slack_or_database(monkeypatch, tm
     assert "### 1. [org/tool](https://github.com/org/tool)" in text
     assert "Why it matters" in text and "Useful automation" in text
     assert "kks0488/repofit" in text and "automation, python" in text
+    assert "kks0488/topic-only" in text
+    assert "kks0488/language-only" not in text
     assert "kks0488/game" not in text
     assert len(list(tmp_path.iterdir())) == 1
 
@@ -159,7 +163,7 @@ def test_digest_preserves_previous_file_on_empty_input_and_handles_no_match(tmp_
                         url="https://github.com/org/tool", description="<script>\nhello")
     path = write_markdown_digest(tmp_path, [repo], [], total_repos=1, day=day)
     text = path.read_text()
-    assert "뚜렷한 언어·주제 일치 없음" in text
+    assert "Matches to our projects" not in text
     assert "<script>" not in text
     with pytest.raises(ValueError, match="empty digest"):
         write_markdown_digest(tmp_path, [], [], total_repos=0, day=day)

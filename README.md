@@ -84,6 +84,11 @@ selects JSON, even if Supabase is configured. Without an AI key, analysis automa
 uses the existing activity/popularity scoring; `--no-analyze` explicitly skips the model.
 The JSON contains all collected repositories, summaries/metadata, and the ranked top picks.
 
+`gt fit` assesses the latest digest (or snapshot) against `~/projects/<category>/<project>` docs.
+Profiles go only to the configured LLM; private results stay outside Git at `~/.local/share/repofit/fit/YYYY-MM-DD.md`.
+Use `--input`, `--projects-dir`, and `--out-dir` to override paths; skill picks include `npx skilladopt add owner/repo`.
+Configure `--llm-base-url/--llm-model/--llm-key-cmd` or `REPOFIT_FIT_BASE_URL`, `REPOFIT_FIT_MODEL`, `REPOFIT_FIT_KEY_CMD`; defaults use Hive and macOS Keychain.
+
 For AI summaries, configure any OpenAI-compatible endpoint. Nebius Token Factory example:
 
 ```bash
@@ -317,12 +322,12 @@ GitHub Actions: [Daily RepoFit Sync](https://github.com/kks0488/repofit/actions/
 runs daily at 22:17 UTC (07:17 KST the next day; GitHub may delay scheduled jobs) and commits
 `digests/YYYY-MM-DD.md` using the KST date. Each digest contains top picks, **why it matters**,
 and up to three matches per pick against the owner's public, active, non-fork GitHub projects.
-Matches use the existing language/topic overlap rule; they are candidates, not tested integrations.
+Matches require shared topics/keywords beyond a language match; they are candidates, not tested integrations.
 No database or Slack setup is needed. JSON and Markdown artifacts are also retained for 90 days.
 
 On the owner's Mac, `~/Library/LaunchAgents/com.kks.repofit-notify.plist` runs
 `scripts/repofit-notify.sh` daily at **08:07 local time**. It pulls `main` with `--ff-only`
-and shows the top three repo names under **repofit 오늘의 오픈소스**. If today's digest is
+and runs `gt fit`, showing up to two adoption recommendations (otherwise three repo names) under **repofit 오늘의 오픈소스**. If today's digest is
 delayed, the notification labels the latest available digest's date. Run the script manually
 to test it; notification banners follow macOS notification settings. Slack sends only with
 `gt digest --notify`, `gt sync --notify`, or an explicitly started `gt bot`.

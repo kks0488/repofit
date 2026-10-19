@@ -74,6 +74,11 @@ gt digest --no-analyze       # 오늘의 Markdown 파일과 JSON 스냅샷 저�
 
 일일 파일에는 Supabase나 AI 키가 필요하지 않습니다. 아래 웹 UI·등록 프로젝트·주간 임베딩 매칭은 선택 기능입니다.
 
+`gt fit`은 최신 digest(없으면 스냅샷)를 `~/projects/<분류>/<프로젝트>` 문서와 비교해 도입 여부를 판정합니다.
+프로필은 설정한 LLM에만 보내며, 비공개 결과는 저장소 밖 `~/.local/share/repofit/fit/YYYY-MM-DD.md`에 저장합니다.
+경로는 `--input`, `--projects-dir`, `--out-dir`로 바꾸며, 스킬 추천에는 `npx skilladopt add owner/repo`가 붙습니다.
+LLM은 `--llm-base-url/--llm-model/--llm-key-cmd` 또는 `REPOFIT_FIT_BASE_URL`, `REPOFIT_FIT_MODEL`, `REPOFIT_FIT_KEY_CMD`로 설정합니다(기본: Hive·Mac 키체인).
+
 ```bash
 cp .env.example .env        # Supabase, OpenAI, (선택) Slack 값 입력
 gt init                     # env 파일 생성, Supabase 스키마(schema.sql) 확인
@@ -232,13 +237,13 @@ cron:
 
 GitHub Actions: `.github/workflows/daily-sync.yml`이 매일 **한국 시간 07:17**(UTC 전날 22:17)에
 실행되어 `digests/YYYY-MM-DD.md`를 한국 날짜로 커밋합니다. 추천 레포·주목할 이유와 함께
-계정 소유자의 공개 프로젝트 중 보관 처리·포크를 제외한 프로젝트를 언어·주제로 비교해 레포당 최대 3개를 보여 줍니다.
+계정 소유자의 공개 프로젝트 중 보관 처리·포크를 제외하고 언어 외 주제·키워드가 겹치는 프로젝트를 레포당 최대 3개 보여 줍니다.
 실제 적용을 검증한 결과는 아닙니다. 데이터베이스·슬랙·AI 키 없이 실행되며, 선택적으로
 `NEBIUS_API_KEY` 또는 `OPENAI_API_KEY` 시크릿을 넣으면 AI 요약을 씁니다.
 JSON과 Markdown 파일은 실행 기록에도 90일간 보관됩니다.
 
 사장님 Mac의 `~/Library/LaunchAgents/com.kks.repofit-notify.plist`가 매일 **현지 시간 08:07**에
-`scripts/repofit-notify.sh`를 실행합니다. 최신 `main`을 받아 상위 레포 3개를
+`scripts/repofit-notify.sh`를 실행합니다. 최신 `main`을 받아 `gt fit`을 실행하고 도입 추천 최대 2개(없거나 실패하면 상위 레포 3개)를
 **repofit 오늘의 오픈소스** 알림으로 표시합니다. GitHub 실행이 늦으면 가장 최근 파일의 날짜를 함께 표시합니다.
 스크립트를 직접 실행해 시험할 수 있으며, 배너 표시는 macOS 알림 설정을 따릅니다.
 슬랙은 `gt digest --notify`, `gt sync --notify` 또는 직접 켠 `gt bot`으로만 사용합니다.

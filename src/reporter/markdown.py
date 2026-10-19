@@ -58,7 +58,7 @@ def write_markdown_digest(
         "",
         f"{total_repos}개 트렌딩 중 상위 {len(repos)}개 · 공개 프로젝트 {len(projects)}개와 비교",
         "",
-        "프로젝트 매칭은 언어·주제의 일치 기준이며, 실제 적용을 검증한 결과는 아닙니다.",
+        "프로젝트 매칭은 주제·키워드가 겹치는 경우만 표시하며, 실제 적용을 검증한 결과는 아닙니다.",
         "",
         "## Top picks",
         "",
@@ -71,13 +71,15 @@ def write_markdown_digest(
             score, overlap = Recommender._calculate_stack_overlap(
                 project["tech_stack"], project["tags"], repo.language, repo.topics,
             )
-            if overlap:
+            # A shared language alone is not evidence of a useful project match.
+            topical_overlap = set(overlap) - {str(repo.language or "").lower()}
+            if topical_overlap:
                 matches.append((score, project["name"], sorted(overlap)))
         matches.sort(key=lambda match: (-match[0], match[1]))
         fit = "; ".join(
             f"[{name}](https://github.com/{name}) ({', '.join(overlap)})"
             for _, name, overlap in matches[:3]
-        ) or "뚜렷한 언어·주제 일치 없음"
+        )
         why = _text(repo.summary or repo.description or "설명 없음")
         lines.extend([
             f"### {rank}. [{repo.full_name}](https://github.com/{repo.full_name})",
@@ -86,9 +88,10 @@ def write_markdown_digest(
             "",
             f"- **Why it matters / 주목할 이유:** {why} "
             f"오늘 별 {repo.stars_today:,}개 증가, 활동·커뮤니티 기반 품질 점수 {repo.overall_score}/100.",
-            f"- **Matches to our projects / 우리 프로젝트:** {fit}",
-            "",
         ])
+        if fit:
+            lines.append(f"- **Matches to our projects / 우리 프로젝트:** {fit}")
+        lines.append("")
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{day.isoformat()}.md"
     fd, temporary = tempfile.mkstemp(dir=directory, prefix=f".{path.name}.")

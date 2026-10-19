@@ -843,6 +843,53 @@ def digest(
 
 
 @app.command()
+def fit(
+    source: Path | None = typer.Option(None, "--input", help="Digest Markdown or snapshot JSON (default: latest digest)"),
+    projects_dir: Path = typer.Option(Path("~/projects"), "--projects-dir"),
+    out_dir: Path = typer.Option(Path("~/.local/share/repofit/fit"), "--out-dir"),
+    llm_base_url: str = typer.Option("https://api.thehive.ai/api/v3", "--llm-base-url", envvar="REPOFIT_FIT_BASE_URL"),
+    llm_model: str = typer.Option("deepseek-ai/deepseek-v4.1-flash-1017", "--llm-model", envvar="REPOFIT_FIT_MODEL"),
+    llm_key_cmd: str = typer.Option(
+        "security find-generic-password -s hive-api -a kyoungsookim -w",
+        "--llm-key-cmd", envvar="REPOFIT_FIT_KEY_CMD",
+    ),
+    notification: bool = typer.Option(False, "--notification", help="Print only safe macOS notification text"),
+) -> None:
+    """Assess local project fit; write private results outside Git repositories."""
+    from datetime import date
+
+    from src.analyzer.fit import (
+        assess_repos,
+        create_fit_client,
+        load_profiles,
+        load_repos,
+        notification_text,
+        private_output_path,
+        write_fit,
+    )
+
+    try:
+        path = private_output_path(out_dir, date.today())
+        input_path, repos = load_repos(source)
+        profiles = load_profiles(projects_dir)
+        with create_fit_client(llm_base_url, llm_key_cmd) as client:
+            results = assess_repos(client, llm_model, repos, profiles)
+        write_fit(path, input_path, results)
+    except Exception:
+        # SDK/subprocess/validation errors can contain credentials or private input.
+        typer.echo("fit 실패: 저장소 밖 출력 경로·입력·프로젝트 문서·LLM 설정을 확인하세요.", err=True)
+        raise typer.Exit(1) from None
+    if notification:
+        typer.echo(notification_text(repos, results))
+    else:
+        typer.echo(f"비공개 fit 저장: {path}")
+        typer.echo(" · ".join(
+            f"{verdict}: {sum(d.verdict == verdict for _, d in results)}"
+            for verdict in ("adopt", "watch", "skip")
+        ))
+
+
+@app.command()
 def sync(
     language: str | None = typer.Option(None, "--lang", "-l"),
     analyze: bool = typer.Option(True, "--analyze/--no-analyze", "-a"),
