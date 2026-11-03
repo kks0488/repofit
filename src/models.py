@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class TrendingRepo(BaseModel):
@@ -47,6 +47,24 @@ class AnalyzedRepo(EnrichedRepo):
 
     analyzed_at: datetime | None = None
     collected_at: datetime | None = None
+
+    # Model replies sometimes put a bare number where text is expected (e.g. 1.5).
+    # Keep the repo instead of dropping the whole analysis.
+    @field_validator("summary", "integration_tips", mode="before")
+    @classmethod
+    def _scalar_to_text(cls, value):
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return str(value)
+        return value
+
+    @field_validator("use_cases", "potential_risks", mode="before")
+    @classmethod
+    def _items_to_text(cls, value):
+        if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+            value = [value]
+        if isinstance(value, list):
+            return [str(item) if isinstance(item, (int, float)) and not isinstance(item, bool) else item for item in value]
+        return value
 
 
 class TrendingSnapshot(BaseModel):
