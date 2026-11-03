@@ -8,7 +8,6 @@ Folder Scanner - 로컬 프로젝트 폴더 스캔 및 자동 등록
 """
 
 import json
-import re
 from pathlib import Path
 
 try:

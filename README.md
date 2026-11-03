@@ -173,6 +173,27 @@ Filters: stars >= 300; pushed in the last 6 months; not archived or forks.
    Fit: README: WebAI2API 是一个基于 Camoufox (Playwright) 的网页版 AI 服务转通用 API 的工具。通过模拟人类操作与 LMArena、Gemini 等网站交互, 提供兼容 OpenAI 格式 的接口服务, 同时支持 多窗口并发 与 多账号管理(浏览器实例数据隔离)。
 ```
 
+## Skill previews
+
+`gt skill-preview` reads the latest digest by default. Use `--input digest.md` (or a
+snapshot / weekly recommendation JSON), `--weekly-match` for the latest stored matches,
+or `--repos owner/repo,...`. It finds SKILL.md files through the pinned GitHub tree and runs
+skilladopt with the Codex worker in disposable Git copies. Nothing is installed. Each report
+contains at most five skills, their decisions and a pinned adoption command to review later.
+Matched projects are found under `--projects-dir` (default `~/projects`, one or two levels);
+weekly JSON may supply `project_path`. Use `--target-dir` when no local match is available.
+Run `gt weekly-match` first to refresh stored matches; their creation dates do not show freshness.
+GitHub authentication uses `GITHUB_TOKEN`, `GH_TOKEN` or `gh auth token` when available.
+
+```bash
+gt skill-preview --repos anthropics/skills --max 2 --target-dir ./my-project --output preview.md
+```
+
+Requires Node 20+, Codex and skilladopt 0.1.11 with `--dry-run` (release pending).
+`--skilladopt-version` pins a different compatible version; `--skilladopt-tarball ./skilladopt-0.1.11.tgz`
+uses an unpublished local build for testing. Keep the report outside target projects.
+No schedule is installed; run weekly from your existing scheduler if needed.
+
 ## Demo
 
 A real run of `gt trending --no-analyze` (October 2026) and the test suite:

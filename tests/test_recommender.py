@@ -8,7 +8,7 @@ fake_supabase.Client = object
 fake_supabase.create_client = lambda *args, **kwargs: None
 sys.modules.setdefault("supabase", fake_supabase)
 
-import src.matcher.recommender as recommender_module
+import src.matcher.recommender as recommender_module  # noqa: E402 - load after the SDK stub
 
 
 class FakeStorage:

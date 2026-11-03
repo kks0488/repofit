@@ -816,6 +816,58 @@ def fit(
         ))
 
 
+@app.command(name="skill-preview")
+def skill_preview(
+    source: Path | None = typer.Option(None, "--input", help="Digest, snapshot or weekly recommendation JSON"),
+    repos: str | None = typer.Option(None, "--repos", help="Comma-separated owner/repo names"),
+    weekly: bool = typer.Option(False, "--weekly-match", help="Use stored weekly-match recommendations"),
+    target_dir: Path | None = typer.Option(None, "--target-dir", help="Fallback local Git project"),
+    projects_dir: Path = typer.Option(Path("~/projects"), "--projects-dir", help="Find matched projects here"),
+    maximum: int = typer.Option(5, "--max", min=1, max=5, help="Weekly skill limit"),
+    output: Path = typer.Option(Path("preview.md"), "--output"),
+    version: str = typer.Option("0.1.11", "--skilladopt-version", help="Exact skilladopt version"),
+    tarball: Path | None = typer.Option(None, "--skilladopt-tarball", help="Test an unpublished local npm tarball"),
+) -> None:
+    """Preview selected skills in temporary project copies without installing them."""
+    import subprocess
+
+    import httpx
+
+    from src.skill_preview import github_headers, load_candidates, preview_report, target_for
+
+    try:
+        rows = load_candidates(source, repos, weekly)
+        if tarball is not None:
+            tarball = tarball.expanduser().resolve(strict=True)
+        # Do not allow the requested report path to change any source project.
+        resolved = output.expanduser().resolve()
+        for row in rows:
+            try:
+                target = target_for(row, target_dir, projects_dir)
+            except ValueError:
+                continue
+            # A target may be a subdirectory of its Git project.
+            root = subprocess.run(
+                ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if root.returncode == 0:
+                target = Path(root.stdout.strip()).resolve()
+            if resolved.is_relative_to(target):
+                raise ValueError("Output must be outside target projects")
+        with httpx.Client(headers=github_headers(), timeout=30) as client:
+            report = preview_report(
+                rows, client, target_dir=target_dir, projects_dir=projects_dir,
+                maximum=maximum, version=version, tarball=tarball,
+            )
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text(report, encoding="utf-8")
+    except Exception:
+        typer.echo("Skill preview failed; check input, output, GitHub and target settings.", err=True)
+        raise typer.Exit(1) from None
+    typer.echo(f"Skill preview saved: {output}")
+
+
 @app.command()
 def sync(
     language: str | None = typer.Option(None, "--lang", "-l"),

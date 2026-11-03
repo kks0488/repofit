@@ -6,7 +6,7 @@ from src.models import AnalyzedRepo
 from src.storage.supabase_client import SupabaseStorage
 
 
-class _UniqueViolation(Exception):
+class _UniqueViolationError(Exception):
     pass
 
 
@@ -69,7 +69,7 @@ class _FakeTable:
         for col in ("full_name", "github_id"):
             values = [r[col] for r in self.rows if r.get(col) is not None]
             if len(values) != len(set(values)):
-                raise _UniqueViolation(col)
+                raise _UniqueViolationError(col)
 
 
 class _FakeClient:
@@ -148,7 +148,7 @@ def test_fake_enforces_unique_github_id():
     # Guard: the old full_name-only upsert reproduces the production 23505 error in this fake.
     rows = [{"id": "old", "github_id": 7, "full_name": "a/old"}]
     client = _FakeClient(rows)
-    with pytest.raises(_UniqueViolation):
+    with pytest.raises(_UniqueViolationError):
         client.table("gt_repositories").upsert(
             [{"full_name": "a/new", "github_id": 7}], on_conflict="full_name"
         ).execute()
