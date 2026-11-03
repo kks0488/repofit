@@ -35,11 +35,11 @@ async def test_daily_sync_without_services_saves_ranked_json(monkeypatch, tmp_pa
     monkeypatch.setattr("src.enricher.enrich_repos", enrich)
     monkeypatch.chdir(tmp_path)
     # No explicit --output and no services: automatically uses a local JSON store.
-    result = await cli._run_daily_digest_pipeline(language=None, analyze=True, send_slack=False, limit=1)
+    result = await cli._run_daily_digest_pipeline(language=None, analyze=True, limit=1)
     path = Path("repofit-snapshot.json")
     payload = json.loads(path.read_text())
     snapshot = TrendingSnapshot.model_validate(payload)
-    assert result == {"total_repos": 2, "curated_count": 1, "slack_sent": False}
+    assert result == {"total_repos": 2, "curated_count": 1}
     assert payload["curated_repositories"] == ["org/rising"]
     assert len(snapshot.repositories) == 2
     assert snapshot.repositories[0].license == "MIT"
@@ -47,7 +47,7 @@ async def test_daily_sync_without_services_saves_ranked_json(monkeypatch, tmp_pa
     # An explicit output must bypass even a configured database, and replace old data.
     settings.supabase_url = "https://example.supabase.co"
     settings.supabase_service_key = "unused-secret"
-    await cli._run_daily_digest_pipeline(language="python", analyze=False, send_slack=False, output=path)
+    await cli._run_daily_digest_pipeline(language="python", analyze=False, output=path)
     assert json.loads(path.read_text())["language"] == "python"
     assert list(tmp_path.iterdir()) == [path.resolve()]
 
@@ -61,7 +61,7 @@ async def test_empty_trending_fails_instead_of_overwriting_snapshot(monkeypatch,
     path = tmp_path / "snapshot.json"
     path.write_text("previous snapshot")
     with pytest.raises(RuntimeError, match="empty snapshot"):
-        await cli._run_daily_digest_pipeline(language=None, analyze=False, send_slack=False, output=path)
+        await cli._run_daily_digest_pipeline(language=None, analyze=False, output=path)
     assert path.read_text() == "previous snapshot"
 
 
@@ -79,14 +79,13 @@ async def test_trending_scrapes_with_supported_lexbor_parser(monkeypatch) -> Non
     assert (repos[0].full_name, repos[0].stars, repos[0].stars_today) == ("org/tool", 1234, 321)
 
 
-def test_digest_command_writes_matches_without_slack_or_database(monkeypatch, tmp_path) -> None:
+def test_digest_command_writes_matches_without_database(monkeypatch, tmp_path) -> None:
     from datetime import date
 
     from typer.testing import CliRunner
 
     settings = Settings(_env_file=None, openai_api_key="")
     monkeypatch.setattr(ai_advisor, "get_settings", lambda: settings)
-    monkeypatch.setattr("src.notifier.SlackNotifier", lambda: pytest.fail("Slack must be opt-in"))
     monkeypatch.setattr("src.storage.SupabaseStorage", lambda: pytest.fail("No database allowed"))
 
     async def fetch(**kwargs):

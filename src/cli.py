@@ -51,23 +51,6 @@ def _curate_repos_for_digest(repos: list, limit: int = 10) -> list:
     return curated
 
 
-def _build_top_repo_payload(repos: list, limit: int = 10) -> list[dict]:
-    return [
-        {
-            "full_name": repo.full_name,
-            "url": repo.url,
-            "description": repo.description,
-            "language": repo.language,
-            "topics": repo.topics,
-            "stars": repo.stars,
-            "stars_today": repo.stars_today,
-            "overall_score": repo.overall_score,
-            "summary": repo.summary,
-        }
-        for repo in _curate_repos_for_digest(repos, limit=limit)
-    ]
-
-
 @app.callback(invoke_without_command=True)
 def _default_to_trending(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
@@ -260,13 +243,6 @@ def setup() -> None:
         console.print(f"  Supabase URL: {settings.supabase_url[:50]}...")
         console.print(f"  OpenAI Model: {settings.openai_model}")
         console.print(f"  GitHub Token: {'Set' if settings.github_token else 'Not set (optional)'}")
-
-        slack_configured = bool(settings.slack_bot_token and settings.slack_channel_id)
-        slack_status = "Configured" if slack_configured else "Not configured"
-        console.print(f"  Slack Bot: {slack_status}")
-        if slack_configured:
-            console.print(f"    Channel: {settings.slack_channel_id}")
-            console.print(f"    Threshold: {settings.slack_notify_threshold}")
     except Exception as e:
         console.print(f"[red]:x: Configuration error: {e}[/red]")
         raise typer.Exit(1)
@@ -576,16 +552,10 @@ def _run_weekly_matching(
     project_id: str | None = None,
     min_stars: int = 50,
     limit: int = 20,
-    notify: bool = False,
-    score_threshold: float | None = None,
 ) -> None:
     from rich.table import Table
 
-    from src.config import get_settings
     from src.matcher import Recommender
-
-    settings = get_settings()
-    threshold = score_threshold if score_threshold is not None else settings.slack_notify_threshold
 
     recommender = Recommender()
     per_project_limit = max(20, limit)
@@ -606,8 +576,6 @@ def _run_weekly_matching(
         with console.status("[bold yellow]Weekly mode: running full matching pipeline..."):
             result = recommender.run_full_pipeline(
                 min_stars=min_stars,
-                notify=notify,
-                score_threshold=threshold,
                 repo_embedding_limit=repo_embedding_limit,
                 per_project_limit=per_project_limit,
             )
@@ -616,10 +584,6 @@ def _run_weekly_matching(
                 f"{result['projects_embedded']} projects[/green]"
             )
             console.print(f"[green]Generated {result['total_recommendations']} recommendations[/green]")
-            if notify and result.get("notified_count", 0) > 0:
-                console.print(f"[cyan]Sent Slack notification for {result['notified_count']} high-score matches[/cyan]")
-            elif notify:
-                console.print(f"[yellow]No recommendations above threshold ({threshold}), no notification sent[/yellow]")
             return
 
     if not recs:
@@ -647,12 +611,6 @@ def weekly_match(
     project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID to match"),
     min_stars: int = typer.Option(50, "--min-stars", help="Minimum stars filter"),
     limit: int = typer.Option(20, "--limit", "-n"),
-    notify: bool = typer.Option(False, "--notify", help="Send Slack notification for high-score matches"),
-    score_threshold: float | None = typer.Option(
-        None,
-        "--score-threshold",
-        help="Minimum score for notification (0.0-1.0)",
-    ),
 ) -> None:
     """Run thorough weekly project matching (secondary workflow)."""
     console.print(
@@ -663,8 +621,6 @@ def weekly_match(
         project_id=project_id,
         min_stars=min_stars,
         limit=limit,
-        notify=notify,
-        score_threshold=score_threshold,
     )
 
 
@@ -673,12 +629,6 @@ def match(
     project_id: str | None = typer.Option(None, "--project", "-p", help="Project ID to match"),
     min_stars: int = typer.Option(50, "--min-stars", help="Minimum stars filter"),
     limit: int = typer.Option(20, "--limit", "-n"),
-    notify: bool = typer.Option(False, "--notify", help="Send Slack notification for high-score matches"),
-    score_threshold: float | None = typer.Option(
-        None,
-        "--score-threshold",
-        help="Minimum score for notification (0.0-1.0)",
-    ),
 ) -> None:
     """Compatibility alias for weekly project matching."""
     console.print("[yellow]`gt match` now runs weekly recommendation mode. Use `gt weekly-match` going forward.[/yellow]")
@@ -686,8 +636,6 @@ def match(
         project_id=project_id,
         min_stars=min_stars,
         limit=limit,
-        notify=notify,
-        score_threshold=score_threshold,
     )
 
 
@@ -738,7 +686,6 @@ async def _run_daily_digest_pipeline(
     *,
     language: str | None,
     analyze: bool,
-    send_slack: bool,
     save: bool = True,
     limit: int = 10,
     output: Path | None = None,
@@ -750,7 +697,6 @@ async def _run_daily_digest_pipeline(
     from src.config import get_settings
     from src.enricher import enrich_repos
     from src.models import TrendingSnapshot
-    from src.notifier import SlackNotifier
     from src.storage import SupabaseStorage, save_file_snapshot
 
     with console.status("[bold green]Fetching trending..."):
@@ -768,7 +714,6 @@ async def _run_daily_digest_pipeline(
         analyzed = await analyze_repos(enriched, skip_ai=not analyze)
 
     curated = _curate_repos_for_digest(analyzed, limit=limit)
-    top_repos = _build_top_repo_payload(analyzed, limit=limit)
 
     settings = get_settings()
     if save:
@@ -785,7 +730,6 @@ async def _run_daily_digest_pipeline(
             snapshot_id = storage.save_snapshot(analyzed, language=language)
             console.print(f"[green]Saved snapshot: {snapshot_id}[/green]")
 
-    slack_sent = False
     if digest_dir is not None:
         from src.reporter.markdown import fetch_public_projects, write_markdown_digest
 
@@ -793,24 +737,9 @@ async def _run_daily_digest_pipeline(
         path = write_markdown_digest(digest_dir, curated, projects, total_repos=len(analyzed))
         console.print(f"[green]Saved Markdown digest: {path}[/green]")
 
-    if send_slack:
-        notifier = SlackNotifier()
-        if not notifier.is_configured():
-            console.print("[yellow]Slack is not configured. Set SLACK_BOT_TOKEN and SLACK_CHANNEL_ID.[/yellow]")
-        elif notifier.notify_trending_summary(
-            total_repos=len(analyzed),
-            language=language,
-            top_repos=top_repos,
-        ):
-            slack_sent = True
-            console.print("[cyan]Sent daily curated digest to Slack[/cyan]")
-        else:
-            console.print("[yellow]Failed to send Slack digest.[/yellow]")
-
     return {
         "total_repos": len(analyzed),
         "curated_count": len(curated),
-        "slack_sent": slack_sent,
     }
 
 
@@ -819,17 +748,15 @@ def digest(
     language: str | None = typer.Option(None, "--lang", "-l"),
     analyze: bool = typer.Option(True, "--analyze/--no-analyze", "-a"),
     limit: int = typer.Option(10, "--limit", "-n", min=1, help="Max curated repos to include"),
-    save: bool = typer.Option(True, "--save/--no-save", help="Save snapshot before sending"),
-    notify: bool = typer.Option(False, "--notify", help="Also send to Slack (off by default)"),
+    save: bool = typer.Option(True, "--save/--no-save", help="Save JSON or database snapshot alongside the Markdown digest"),
     digest_dir: Path = typer.Option(Path("digests"), "--digest-dir"),
     project_owner: str = typer.Option("kks0488", "--project-owner", help="Public GitHub projects to match"),
 ) -> None:
-    """Write today's Markdown digest with project matches; Slack is opt-in."""
+    """Write today's Markdown digest with project matches."""
     result = asyncio.run(
         _run_daily_digest_pipeline(
             language=language,
             analyze=analyze,
-            send_slack=notify,
             save=save,
             limit=limit,
             digest_dir=digest_dir,
@@ -893,18 +820,16 @@ def fit(
 def sync(
     language: str | None = typer.Option(None, "--lang", "-l"),
     analyze: bool = typer.Option(True, "--analyze/--no-analyze", "-a"),
-    notify: bool = typer.Option(False, "--notify", help="Send daily curated digest to Slack"),
     limit: int = typer.Option(10, "--limit", "-n", help="Max curated repos in digest"),
     output: Path | None = typer.Option(None, "--output", help="Save JSON instead of Supabase (automatic without database credentials)"),
     digest_dir: Path | None = typer.Option(None, "--digest-dir", help="Also write a dated Markdown digest"),
     project_owner: str = typer.Option("kks0488", "--project-owner"),
 ) -> None:
-    """Daily sync: fetch trending, analyze, save, and optionally send digest."""
+    """Daily sync: fetch trending, analyze, save, and optionally write a Markdown digest."""
     result = asyncio.run(
         _run_daily_digest_pipeline(
             language=language,
             analyze=analyze,
-            send_slack=notify,
             save=True,
             limit=limit,
             output=output,
@@ -924,12 +849,9 @@ def schedule(
     minute: int = typer.Option(0, "--minute", "-M", help="Local minute to run (0-59)"),
     language: str | None = typer.Option(None, "--lang", "-l"),
     analyze: bool = typer.Option(True, "--analyze/--no-analyze", "-a"),
-    notify: bool = typer.Option(False, "--notify/--no-notify", help="Send Slack digest (off by default)"),
     limit: int = typer.Option(10, "--limit", "-n", help="Max curated repos in digest"),
 ) -> None:
     """Run daily curation sync at a fixed local time."""
-    from src.notifier import SlackNotifier
-
     if not (0 <= hour <= 23 and 0 <= minute <= 59):
         console.print("[red]Invalid time. Use --hour 0-23 and --minute 0-59.[/red]")
         raise typer.Exit(1)
@@ -950,7 +872,6 @@ def schedule(
                     _run_daily_digest_pipeline(
                         language=language,
                         analyze=analyze,
-                        send_slack=notify,
                         save=True,
                         limit=limit,
                         digest_dir=Path("digests"),
@@ -958,17 +879,6 @@ def schedule(
                 )
             except Exception as exc:
                 console.print(f"[red]Scheduled curation sync failed: {exc}[/red]")
-                if notify:
-                    try:
-                        notifier = SlackNotifier()
-                        if notifier.is_configured():
-                            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            error_text = str(exc)[:200] if str(exc) else "unknown error"
-                            notifier.send_message(
-                                text=f"RepoFit daily digest failed at {timestamp}: {error_text}"
-                            )
-                    except Exception as notify_exc:
-                        console.print(f"[red]Slack failure notification failed: {notify_exc}[/red]")
     except KeyboardInterrupt:
         console.print("\n[yellow]Scheduler stopped.[/yellow]")
 
@@ -1091,16 +1001,6 @@ def scan_projects(
         console.print(table)
 
     console.print("\nView recommendations: [cyan]gt recommendations[/cyan]")
-
-
-@app.command()
-def bot(
-    projects_path: str = typer.Option("~/projects", "--path", "-p", help="Projects folder to scan"),
-) -> None:
-    """Start Slack auto-reply bot (Socket Mode)."""
-    from src.notifier.bot import run_bot
-
-    run_bot(projects_path=projects_path)
 
 
 if __name__ == "__main__":

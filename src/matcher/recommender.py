@@ -5,7 +5,6 @@ from src.embedder.openai_embedder import (
     create_repo_summary,
     embed_text,
 )
-from src.notifier import SlackNotifier
 from src.storage import SupabaseStorage
 
 logger = logging.getLogger(__name__)
@@ -156,9 +155,6 @@ class Recommender:
     def run_full_pipeline(
         self,
         min_stars: int = 100,
-        notify: bool = False,
-        score_threshold: float = 0.7,
-        trending_summary: dict | None = None,
         repo_embedding_limit: int = 50,
         per_project_limit: int = 20,
     ) -> dict:
@@ -166,7 +162,6 @@ class Recommender:
         projects_embedded = self.embed_new_projects()
 
         projects = self.storage.get_projects()
-        all_recommendations: list[dict] = []
         total_recommendations = 0
 
         for project in projects:
@@ -175,49 +170,24 @@ class Recommender:
                 min_stars=min_stars,
                 limit=per_project_limit,
             )
-            for r in recs:
-                r["project_name"] = project.get("name", "")
-            all_recommendations.extend(recs)
             total_recommendations += len(recs)
-
-        notified_count = 0
-        if notify:
-            high_score_recs = [
-                r for r in all_recommendations
-                if r.get("score", 0) >= score_threshold
-            ]
-            if high_score_recs:
-                notifier = SlackNotifier()
-                if notifier.notify_recommendations(
-                    recommendations=high_score_recs,
-                    threshold=score_threshold,
-                    trending_summary=trending_summary,
-                ):
-                    notified_count = len(high_score_recs)
 
         return {
             "repos_embedded": repos_embedded,
             "projects_embedded": projects_embedded,
             "projects_matched": len(projects),
             "total_recommendations": total_recommendations,
-            "notified_count": notified_count,
         }
 
 
 def run_matching_pipeline(
     min_stars: int = 100,
-    notify: bool = False,
-    score_threshold: float = 0.7,
-    trending_summary: dict | None = None,
     repo_embedding_limit: int = 50,
     per_project_limit: int = 20,
 ) -> dict:
     recommender = Recommender()
     return recommender.run_full_pipeline(
         min_stars=min_stars,
-        notify=notify,
-        score_threshold=score_threshold,
-        trending_summary=trending_summary,
         repo_embedding_limit=repo_embedding_limit,
         per_project_limit=per_project_limit,
     )

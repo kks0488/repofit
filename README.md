@@ -45,7 +45,7 @@ Register projects by hand, sync them from your GitHub account, or scan a local f
 <td width="50%" valign="top">
 
 ### Daily digest and Mac notification
-`gt digest` writes `digests/YYYY-MM-DD.md` with top picks, why they matter, and project matches. Slack delivery and the Socket Mode bot remain optional; sending is off by default.
+`gt digest` writes `digests/YYYY-MM-DD.md` with top picks, why they matter, and project matches.
 
 </td>
 </tr>
@@ -103,14 +103,14 @@ Never commit keys or `.env` files. JSON snapshots contain repository data only.
 Supabase (Postgres + pgvector) remains optional for the web UI, project registry and weekly embedding matches:
 
 ```bash
-cp .env.example .env        # fill in Supabase, OpenAI and (optionally) Slack values
+cp .env.example .env        # fill in Supabase and OpenAI values
 gt init                     # creates env files and checks the Supabase schema (schema.sql)
 gt quickstart               # seeds the first curated snapshot
 
 gt project-add --name "MyApp" --stack "python,fastapi" --tags "api,web"
 gt github-sync              # or import your GitHub repos as projects
 
-gt digest                   # write digests/YYYY-MM-DD.md (add --notify for Slack)
+gt digest                   # write digests/YYYY-MM-DD.md
 gt weekly-match             # match stored repos to your projects
 ```
 
@@ -187,7 +187,6 @@ flowchart LR
     B --> C[AI analysis<br/>optional]
     C --> J[Daily Markdown digest<br/>git commit + Mac notification]
     C --> D[(Optional Supabase<br/>+ pgvector)]
-    D --> E[Optional Slack<br/>--notify]
     D --> F[gt weekly-match<br/>embeddings]
     G[Your projects<br/>manual · GitHub · folder scan] --> F
     D --> H[Next.js web UI]
@@ -211,7 +210,6 @@ Yes: `gt schedule` (long-running), the systemd timer in `scripts/`, cron, or the
 ## Roadmap (planned, not built yet)
 
 - Package the CLI for `pipx install`.
-- Language and topic filters in the Slack digest.
 - Hosted demo of the web UI.
 
 ---
@@ -227,7 +225,7 @@ Yes: `gt schedule` (long-running), the systemd timer in `scripts/`, cron, or the
 | `gt setup` | Validate configuration and show setup hints |
 | `gt quickstart` | Seed daily curation data quickly |
 | `gt` / `gt trending` | View daily curated trending repos (`--lang`, `--since`, `-n`, `--no-enrich`, `--no-analyze`, `--save`) |
-| `gt digest` | Write today's Markdown digest with project matches; `--notify` opts into Slack |
+| `gt digest` | Write today's Markdown digest with project matches |
 | `gt inspect owner/repo` | Detailed repo analysis |
 | `gt history owner/repo` | Trending history for a repo |
 | `gt snapshots` | List saved trending snapshots |
@@ -240,9 +238,8 @@ Yes: `gt schedule` (long-running), the systemd timer in `scripts/`, cron, or the
 | `gt recommendations` | View AI recommendations |
 | `gt need-search "your need"` | Search GitHub for up to five popular, maintained repos; no database or AI key |
 | `gt discover` | Search GitHub for repos that fit your projects |
-| `gt sync` | Daily curation sync; `--output path.json` selects a file, automatic JSON without database credentials; `--no-analyze` skips AI; `--notify` optionally sends Slack |
+| `gt sync` | Daily curation sync; `--output path.json` selects a file, automatic JSON without database credentials; `--no-analyze` skips AI |
 | `gt schedule` | Run the daily sync at a fixed local time (default 19:00) |
-| `gt bot` | Start the Slack auto-reply bot (Socket Mode) |
 
 ### Environment variables
 
@@ -257,48 +254,12 @@ OPENAI_MODEL=gpt-5.2
 OPENAI_EMBEDDING_API_KEY=your-openai-embedding-key
 GITHUB_TOKEN=your-github-token              # github-sync, higher rate limits
 
-# Slack (optional)
-SLACK_BOT_TOKEN=xoxb-xxx
-SLACK_APP_TOKEN=xapp-xxx                    # Socket Mode, for gt bot
-SLACK_CHANNEL_ID=C0123456789
-SLACK_NOTIFY_THRESHOLD=0.7
-
 # Frontend (web/.env.local)
 NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
 If `OPENAI_BASE_URL` is not set, the code defaults to a local OpenAI-compatible proxy (`http://localhost:8317/v1`), so set it explicitly when using the OpenAI API.
-
-### Slack setup (optional, off by default)
-
-1. Create a Slack app at [api.slack.com/apps](https://api.slack.com/apps). Bot token scopes: `chat:write`, `channels:read`, `channels:history`. Install it and copy the `xoxb-` token, then `/invite @YourBot` in your channel.
-2. For the bot: enable Socket Mode, create an app-level token with `connections:write` (`xapp-`), enable events and subscribe to `message.channels` and `app_mention`.
-3. Put the tokens and channel ID in `.env`.
-
-Bot commands typed in the channel or a thread:
-
-| Message | Action |
-|---------|--------|
-| `scan` / `스캔` | Scan project folders → register → match |
-| `recommend` / `추천` | Post recommendations |
-| `trending` / `트렌딩` | Post the trending top 10 |
-| `match` / `매칭` | Run matching and post the results |
-
-Any other question is answered from stored repo data (langchain + pgvector retrieval).
-
-Sample digest layout (placeholder repos):
-
-```
-📌 RepoFit Daily Trending Curation
-🌐 All languages • 10 picks from 25 trending repos
-────────────────────────────
-*AI/ML*
-  owner/repo-a ⭐ 12,421 · +684 today ⚡ Rising fast
-  Why: High-velocity open-source agent framework with practical tooling.
-────────────────────────────
-Top 10 only: highest momentum + quality signals
-```
 
 ### Daily automation
 
@@ -323,14 +284,14 @@ runs daily at 22:17 UTC (07:17 KST the next day; GitHub may delay scheduled jobs
 `digests/YYYY-MM-DD.md` using the KST date. Each digest contains top picks, **why it matters**,
 and up to three matches per pick against the owner's public, active, non-fork GitHub projects.
 Matches require shared topics/keywords beyond a language match; they are candidates, not tested integrations.
-No database or Slack setup is needed. JSON and Markdown artifacts are also retained for 90 days.
+No database setup is needed. JSON and Markdown artifacts are also retained for 90 days.
 
 On the owner's Mac, `~/Library/LaunchAgents/com.kks.repofit-notify.plist` runs
 `scripts/repofit-notify.sh` daily at **08:07 local time**. It pulls `main` with `--ff-only`
 and runs `gt fit`, showing up to two adoption recommendations (otherwise three repo names) under **repofit 오늘의 오픈소스**. If today's digest is
 delayed, the notification labels the latest available digest's date. Run the script manually
-to test it; notification banners follow macOS notification settings. Slack sends only with
-`gt digest --notify`, `gt sync --notify`, or an explicitly started `gt bot`.
+to test it; notification banners follow macOS notification settings and surface
+today's top three picks locally.
 
 For optional AI summaries, add the repository secret `NEBIUS_API_KEY`; this selects
 `https://api.tokenfactory.nebius.com/v1` and `nvidia/Nemotron-3_5-Lightning` by default.
@@ -370,11 +331,11 @@ Pages: latest trending, your projects (add / list), and recommendations, all rea
 | Component | Technology |
 |-----------|------------|
 | CLI | Python, Typer, Rich |
-| AI | OpenAI-compatible API (analysis + embeddings), langchain |
+| AI | OpenAI-compatible API (analysis + embeddings) |
 | Database | Supabase (PostgreSQL + pgvector) |
 | Frontend | Next.js 16, React 19, Tailwind CSS 4, TanStack Query |
 | HTTP / scraping | httpx (async), selectolax |
-| Delivery | Daily Markdown commit, macOS notification; optional Slack |
+| Delivery | Daily Markdown commit, macOS notification |
 
 ### Tests
 
@@ -387,7 +348,6 @@ pytest -q
 
 - **Schema missing:** run `schema.sql` in the Supabase SQL editor.
 - **No recommendations:** set `OPENAI_EMBEDDING_API_KEY`, then run `gt weekly-match`.
-- **Slack not working:** check `SLACK_BOT_TOKEN` and `SLACK_CHANNEL_ID`.
 - **No project matches:** register projects with `gt project-add` first.
 - **GitHub sync fails:** check `GITHUB_TOKEN` permissions (repo scope).
 

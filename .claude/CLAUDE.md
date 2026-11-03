@@ -29,8 +29,6 @@
 cat ~/.config/claude-projects/global.env
 ```
 
-포함된 키: GEMINI_API_KEY, DEEPSEEK_API_KEY, OPENAI_API_KEY, SUPABASE_*, NAVER_*, SLACK_BOT_TOKEN
-
 ### ⚠️ 주의사항
 - **PORT 하드코딩 금지** - `.env`의 PORT 사용
 - **API 키 직접 입력 금지** - global.env에서 복사
