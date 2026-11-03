@@ -178,6 +178,7 @@ Filters: stars >= 300; pushed in the last 6 months; not archived or forks.
 `gt skill-preview` looks for `SKILL.md` files in this week's picked repositories (from the latest digest, saved matches via `--weekly-match`, or passed directly with `--repos owner/repo`).
 For each match, it creates a temporary git copy of your project and runs `skilladopt --dry-run` with Codex making the call, installing nothing in your working tree.
 It writes a single report outside the target project containing verdicts for up to 5 skills, a summary of what would change, and commit-pinned adoption commands for later review.
+`--per-repo` defaults to 2; selection rotates across repositories, using tracked files from the target's HEAD and reporting elapsed time and repository counts at the top.
 Projects are resolved from `--projects-dir` (default `~/projects`), falling back to `--target-dir` when needed.
 You need Node 20+, Codex CLI, and `skilladopt` 0.1.11+, and GitHub auth is checked in the order of `GITHUB_TOKEN`, `GH_TOKEN`, and `gh auth token`.
 Built-in scheduling is not included, so add the command to your own scheduler if you want to run it weekly.

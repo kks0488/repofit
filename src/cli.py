@@ -824,12 +824,15 @@ def skill_preview(
     target_dir: Path | None = typer.Option(None, "--target-dir", help="Fallback local Git project"),
     projects_dir: Path = typer.Option(Path("~/projects"), "--projects-dir", help="Find matched projects here"),
     maximum: int = typer.Option(5, "--max", min=1, max=5, help="Weekly skill limit"),
+    per_repo: int = typer.Option(2, "--per-repo", min=1, help="Maximum skills per source repository"),
     output: Path = typer.Option(Path("preview.md"), "--output"),
     version: str = typer.Option("0.1.11", "--skilladopt-version", help="Exact skilladopt version"),
     tarball: Path | None = typer.Option(None, "--skilladopt-tarball", help="Test an unpublished local npm tarball"),
 ) -> None:
     """Preview selected skills in temporary project copies without installing them."""
     import subprocess
+
+    started = time.perf_counter()
 
     import httpx
 
@@ -859,6 +862,7 @@ def skill_preview(
             report = preview_report(
                 rows, client, target_dir=target_dir, projects_dir=projects_dir,
                 maximum=maximum, version=version, tarball=tarball,
+                per_repo=per_repo, started_at=started,
             )
         resolved.parent.mkdir(parents=True, exist_ok=True)
         resolved.write_text(report, encoding="utf-8")

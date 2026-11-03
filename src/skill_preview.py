@@ -6,7 +6,11 @@ import re
 import shlex
 import shutil
 import subprocess
+import tarfile
 import tempfile
+import time
+from collections import Counter
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
@@ -16,6 +20,16 @@ from src.analyzer.fit import REPO_NAME, load_repos
 from src.utils import build_github_api_headers
 
 SKILLADOPT_VERSION = "0.1.11"
+
+
+@contextmanager
+def measure(timings: dict[str, float], stage: str):
+    """Include failed stages as well as successful ones in elapsed time."""
+    started = time.perf_counter()
+    try:
+        yield
+    finally:
+        timings[stage] = timings.get(stage, 0.0) + time.perf_counter() - started
 
 
 def github_headers() -> dict[str, str]:
@@ -113,30 +127,55 @@ def target_for(row: dict, fallback: Path | None, projects_dir: Path) -> Path:
 
 
 def copy_project(target: Path, destination: Path) -> None:
-    """Copy tracked and unignored working files without sharing .git or following symlinks."""
+    """Stream committed HEAD files into an independent, history-free Git repository.
+
+    Local edits, untracked files, symlinks and submodule contents are excluded.
+    Unlike a worktree, the copy never registers anything in the source repository.
+    """
     result = subprocess.run(
-        ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
+        ["git", "-C", str(target), "rev-parse", "--path-format=absolute", "--git-path", "objects"],
         capture_output=True, text=True, check=True, timeout=30,
     )
-    root = Path(result.stdout.strip()).resolve()
-    result = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-        capture_output=True, check=True, timeout=30,
-    )
-    destination.mkdir()
-    for raw in set(result.stdout.split(b"\0")) - {b""}:
-        name = os.fsdecode(raw)
-        source = root / name
-        parts = Path(name).parts
-        if Path(name).is_absolute() or ".." in parts or ".git" in parts:
-            raise ValueError("Invalid project file path")
-        if any((root.joinpath(*parts[:i])).is_symlink() for i in range(1, len(parts) + 1)):
-            continue
-        if source.is_file():
-            copied = destination / name
-            copied.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source, copied)
+    objects = result.stdout.strip()
+    commit = subprocess.run(
+        ["git", "-C", str(target), "rev-parse", "--verify", "HEAD"],
+        capture_output=True, text=True, check=True, timeout=30,
+    ).stdout.strip()
     subprocess.run(["git", "init", "-q", str(destination)], capture_output=True, check=True, timeout=30)
+    attributes = destination / ".git/info/attributes"
+    attributes.parent.mkdir(parents=True, exist_ok=True)
+    # info/attributes overrides committed export rules. Project instructions must
+    # neither disappear (export-ignore) nor be rewritten (export-subst).
+    attributes.write_text("* -export-ignore -export-subst\n", encoding="utf-8")
+    command = ["git", "-C", str(destination), "archive", "--format=tar", commit]
+    # Only this read-only archive process sees the source object path. The new
+    # repository keeps no alternates, worktree registration or source reference.
+    process = subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        env={**os.environ, "GIT_OBJECT_DIRECTORY": objects},
+    )
+    try:
+        # Never extract links or metadata from the archive. Only regular file bytes
+        # may enter the disposable project; no source hooks or Git config are copied.
+        with tarfile.open(fileobj=process.stdout, mode="r|", bufsize=1024 * 1024) as archive:
+            for member in archive:
+                if not member.isfile():
+                    continue
+                name = member.name
+                if name.startswith("/") or any(p in {"", ".", "..", ".git"} for p in name.split("/")):
+                    raise ValueError("Invalid project file path")
+                copied = destination / name
+                copied.parent.mkdir(parents=True, exist_ok=True)
+                with archive.extractfile(member) as source, copied.open("wb") as output:
+                    shutil.copyfileobj(source, output, length=1024 * 1024)
+        if process.wait(timeout=30) != 0:
+            raise subprocess.CalledProcessError(process.returncode, command)
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.stdout.close()
+        process.wait()
+        attributes.unlink()
 
 
 def adoption_command(repo: str, path: str, commit: str, version: str) -> list[str]:
@@ -158,20 +197,25 @@ def external_temp_dir(target: Path) -> Path:
 
 def run_preview(
     command: list[str], target: Path, token: str | None, tarball: Path | None = None,
+    *, timings: dict[str, float] | None = None,
 ) -> dict:
+    if timings is None:
+        timings = {}
     with tempfile.TemporaryDirectory(prefix="repofit-preview-", dir=external_temp_dir(target)) as temporary:
         copy = Path(temporary) / "project"
-        copy_project(target, copy)
+        with measure(timings, "copy"):
+            copy_project(target, copy)
         env = {**os.environ, "SKILLADOPT_HOME": str(Path(temporary) / "cache"), "NO_COLOR": "1"}
         if token:
             env["GITHUB_TOKEN"] = token
         invocation = command
         if tarball is not None:
             invocation = ["npx", "--yes", "--package", str(tarball), "skilladopt", *command[3:]]
-        result = subprocess.run(
-            [*invocation, "--dry-run", "--json", "--worker", "codex"], cwd=copy, env=env,
-            capture_output=True, text=True, timeout=900,
-        )
+        with measure(timings, "skilladopt"):
+            result = subprocess.run(
+                [*invocation, "--dry-run", "--json", "--worker", "codex"], cwd=copy, env=env,
+                capture_output=True, text=True, timeout=900,
+            )
         # Refusals and reviews intentionally exit 1; their JSON still belongs in the report.
         if result.returncode not in {0, 1, 2} or len(result.stdout.strip().splitlines()) != 1:
             raise ValueError("skilladopt failed to return one JSON result")
@@ -207,58 +251,86 @@ def _text(value: object) -> str:
 def preview_report(
     rows: list[dict], client: httpx.Client, *, target_dir: Path | None,
     projects_dir: Path, maximum: int = 5, version: str = SKILLADOPT_VERSION,
-    tarball: Path | None = None,
+    tarball: Path | None = None, per_repo: int = 2, started_at: float | None = None,
 ) -> str:
+    started = time.perf_counter() if started_at is None else started_at
+    timings = {"copy": 0.0, "skilladopt": 0.0, "github": 0.0}
     if not 1 <= maximum <= 5:
         raise ValueError("--max must be between 1 and 5")
+    if per_repo < 1:
+        raise ValueError("--per-repo must be at least 1")
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?", version):
         raise ValueError("--skilladopt-version must be an exact version")
     lines = ["# Weekly skill preview", "", "Preview only. No skills were installed.", ""]
-    count = 0
+    sources = []
+    seen = set()
     for row in rows:
-        if count >= maximum:
+        if len(sources) >= maximum:
             break
         repo = row["full_name"]
         if not REPO_NAME.fullmatch(repo):
             raise ValueError("Invalid repository name")
+        if repo.casefold() in seen:
+            continue
+        seen.add(repo.casefold())
         try:
-            commit, paths = discover_skills(client, repo)
+            with measure(timings, "github"):
+                commit, paths = discover_skills(client, repo)
         except (httpx.HTTPError, ValueError, KeyError):
             lines.extend([f"- {_text(repo)}: discovery failed; check GitHub access or tree limits.", ""])
             continue
         if not paths:
             lines.extend([f"- {_text(repo)}: no SKILL.md found.", ""])
-        for path in paths:
-            if count >= maximum:
-                break
-            count += 1
-            command = adoption_command(repo, path, commit, version)
-            lines.extend([f"## {count}. {_text(repo)} / {_text(path)}", "", f"- Source commit: `{commit}`"])
-            try:
-                target = target_for(row, target_dir, projects_dir)
-                auth = client.headers.get("Authorization", "")
-                token = auth.removeprefix("Bearer ") or None
-                data = run_preview(command, target, token, tarball)
-                lines.extend([
-                    f"- License: {_text(data['license'] or 'UNKNOWN')}",
-                    f"- Verdict: {_text(data['verdict'])}",
-                    "- Decisions: " + _text(json.dumps(data["counts"], ensure_ascii=False)),
-                    f"- Job: {_text(data['jobId'])} (preview only, not saved)",
-                    "- Changed blocks:",
-                ])
-                for change in data["changes"]:
-                    lines.append(f"  - {_text(change['block'])} ({_text(change['file'])}, {_text(change['action'])}): "
-                                 f"{_text(change['before'])} -> {_text(change['after'])}; {_text(change['reason'])}")
-                if not data["changes"]:
-                    lines.append("  - None.")
-                reasons = "; ".join(str(reason) for reason in data["rejectionReasons"]) or "None."
-                lines.append(f"- Refusal reason: {_text(reasons)}")
-            except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
-                # Subprocess errors can contain credentials, private paths or project text.
-                lines.extend(["- License: UNKNOWN", "- Verdict: unavailable",
-                              "- Refusal reason: preview failed; check target Git repository, worker and skilladopt version."])
-            url = f"https://github.com/{repo}/blob/{commit}/{quote(path)}"
-            lines.extend([f"- Skill: {url}", "- Adoption command (run in the chosen project after review):",
-                          "", "```bash", shlex.join(command), "```", ""])
-    lines.extend([f"Skills previewed: {count}/{maximum}.", ""])
-    return "\n".join(lines)
+        if paths:
+            sources.append((row, commit, paths[:per_repo]))
+    # Give every eligible repository one turn before selecting a second skill.
+    selected = [
+        (row, commit, paths[index])
+        for index in range(min(per_repo, maximum))
+        for row, commit, paths in sources if index < len(paths)
+    ][:maximum]
+    counts = Counter(row["full_name"] for row, _, _ in selected)
+    for count, (row, commit, path) in enumerate(selected, 1):
+        repo = row["full_name"]
+        command = adoption_command(repo, path, commit, version)
+        lines.extend([f"## {count}. {_text(repo)} / {_text(path)}", "", f"- Source commit: `{commit}`"])
+        try:
+            target = target_for(row, target_dir, projects_dir)
+            auth = client.headers.get("Authorization", "")
+            token = auth.removeprefix("Bearer ") or None
+            data = run_preview(command, target, token, tarball, timings=timings)
+            lines.extend([
+                f"- License: {_text(data['license'] or 'UNKNOWN')}",
+                f"- Verdict: {_text(data['verdict'])}",
+                "- Decisions: " + _text(json.dumps(data["counts"], ensure_ascii=False)),
+                f"- Job: {_text(data['jobId'])} (preview only, not saved)",
+                "- Changed blocks:",
+            ])
+            for change in data["changes"]:
+                lines.append(f"  - {_text(change['block'])} ({_text(change['file'])}, {_text(change['action'])}): "
+                             f"{_text(change['before'])} -> {_text(change['after'])}; {_text(change['reason'])}")
+            if not data["changes"]:
+                lines.append("  - None.")
+            reasons = "; ".join(str(reason) for reason in data["rejectionReasons"]) or "None."
+            lines.append(f"- Refusal reason: {_text(reasons)}")
+        except (OSError, subprocess.SubprocessError, tarfile.TarError, ValueError, KeyError, TypeError):
+            # Subprocess errors can contain credentials, private paths or project text.
+            lines.extend(["- License: UNKNOWN", "- Verdict: unavailable",
+                          "- Refusal reason: preview failed; check target Git repository, worker and skilladopt version."])
+        url = f"https://github.com/{repo}/blob/{commit}/{quote(path)}"
+        lines.extend([f"- Skill: {url}", "- Adoption command (run in the chosen project after review):",
+                      "", "```bash", shlex.join(command), "```", ""])
+    lines.extend([f"Skills previewed: {len(selected)}/{maximum}.", ""])
+    elapsed = time.perf_counter() - started
+    summary = [
+        "# Weekly skill preview", "",
+        f"- Total elapsed: {elapsed:.3f} s",
+        f"- Temporary copies (tracked HEAD files only): {timings['copy']:.3f} s",
+        f"- skilladopt / Codex (including startup and source fetch): {timings['skilladopt']:.3f} s",
+        f"- GitHub discovery: {timings['github']:.3f} s",
+        f"- Other (setup, validation, cleanup): {max(0.0, elapsed - sum(timings.values())):.3f} s",
+        f"- Skills selected by repository (limit {per_repo} each): "
+        + (", ".join(f"{_text(repo)}: {number}" for repo, number in counts.items()) or "None."),
+        "",
+    ]
+    return "\n".join(summary + lines[2:])
