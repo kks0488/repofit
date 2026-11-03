@@ -175,24 +175,16 @@ Filters: stars >= 300; pushed in the last 6 months; not archived or forks.
 
 ## Skill previews
 
-`gt skill-preview` reads the latest digest by default. Use `--input digest.md` (or a
-snapshot / weekly recommendation JSON), `--weekly-match` for the latest stored matches,
-or `--repos owner/repo,...`. It finds SKILL.md files through the pinned GitHub tree and runs
-skilladopt with the Codex worker in disposable Git copies. Nothing is installed. Each report
-contains at most five skills, their decisions and a pinned adoption command to review later.
-Matched projects are found under `--projects-dir` (default `~/projects`, one or two levels);
-weekly JSON may supply `project_path`. Use `--target-dir` when no local match is available.
-Run `gt weekly-match` first to refresh stored matches; their creation dates do not show freshness.
-GitHub authentication uses `GITHUB_TOKEN`, `GH_TOKEN` or `gh auth token` when available.
+`gt skill-preview` looks for `SKILL.md` files in this week's picked repositories (from the latest digest, saved matches via `--weekly-match`, or passed directly with `--repos owner/repo`).
+For each match, it creates a temporary git copy of your project and runs `skilladopt --dry-run` with Codex making the call, installing nothing in your working tree.
+It writes a single report outside the target project containing verdicts for up to 5 skills, a summary of what would change, and commit-pinned adoption commands for later review.
+Projects are resolved from `--projects-dir` (default `~/projects`), falling back to `--target-dir` when needed.
+You need Node 20+, Codex CLI, and `skilladopt` 0.1.11+, and GitHub auth is checked in the order of `GITHUB_TOKEN`, `GH_TOKEN`, and `gh auth token`.
+Built-in scheduling is not included, so add the command to your own scheduler if you want to run it weekly.
 
 ```bash
 gt skill-preview --repos anthropics/skills --max 2 --target-dir ./my-project --output preview.md
 ```
-
-Requires Node 20+, Codex and skilladopt 0.1.11 with `--dry-run` (release pending).
-`--skilladopt-version` pins a different compatible version; `--skilladopt-tarball ./skilladopt-0.1.11.tgz`
-uses an unpublished local build for testing. Keep the report outside target projects.
-No schedule is installed; run weekly from your existing scheduler if needed.
 
 ## Demo
 

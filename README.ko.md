@@ -93,24 +93,16 @@ gt weekly-match             # 저장된 레포를 내 프로젝트와 매칭
 
 ## 스킬 미리 보기
 
-`gt skill-preview`는 기본으로 최신 digest를 읽습니다. `--input digest.md`(또는 스냅샷,
-주간 추천 JSON), 최근 저장된 주간 매칭을 읽는 `--weekly-match`, 직접 고르는
-`--repos owner/repo,...`도 지원합니다. GitHub의 고정된 커밋에서 SKILL.md를 찾고,
-임시 Git 사본에서 Codex 작업자로 skilladopt를 돌립니다. 실제 설치는 하지 않습니다.
-한 장에 최대 다섯 스킬의 판단, 변경 요약, 나중에 검토할 입양 명령을 담습니다.
-매칭된 프로젝트는 `--projects-dir`(기본 `~/projects`, 한두 단계 아래)에서 찾습니다.
-주간 JSON의 `project_path`로 직접 지정하거나, 찾을 수 없으면 `--target-dir`를 씁니다.
-저장된 매칭은 `gt weekly-match`로 먼저 갱신하세요. 저장된 최초 날짜로 최신 여부를 판단하지 않습니다.
-GitHub 인증은 `GITHUB_TOKEN`, `GH_TOKEN`, `gh auth token` 순으로 있는 것을 씁니다.
+`gt skill-preview`는 이번 주 고른 저장소(최신 digest, `--weekly-match`로 저장된 매칭, 또는 `--repos owner/repo`로 직접 지정)에서 `SKILL.md`를 찾습니다.
+매칭된 프로젝트의 임시 git 사본에서 `skilladopt --dry-run`(Codex가 판정)을 돌리며, 실제로는 아무것도 설치하지 않습니다.
+대상 프로젝트 바깥에 저장되는 한 장짜리 보고서에는 스킬 최대 5개의 판정, 바뀔 곳 요약, 나중에 검토할 입양 명령(커밋 고정)을 담습니다.
+프로젝트는 `--projects-dir`(기본 `~/projects`)에서 먼저 찾고, 없으면 `--target-dir`을 씁니다.
+실행에는 Node 20 이상, Codex CLI, `skilladopt` 0.1.11 이상이 필요하며, GitHub 인증은 `GITHUB_TOKEN`, `GH_TOKEN`, `gh auth token` 순으로 확인합니다.
+예약 기능은 따로 넣지 않았으니 매주 돌리려면 쓰는 예약 도구에 넣어 두면 됩니다.
 
 ```bash
 gt skill-preview --repos anthropics/skills --max 2 --target-dir ./my-project --output preview.md
 ```
-
-Node 20 이상, Codex, `--dry-run`이 있는 skilladopt 0.1.11이 필요합니다(공개 예정).
-`--skilladopt-version`으로 호환 버전을 고정하거나 `--skilladopt-tarball ./skilladopt-0.1.11.tgz`로
-공개 전 수정본을 시험할 수 있습니다. 보고서는 대상 프로젝트 밖에 저장하세요.
-실행 예약은 추가하지 않으며, 필요하면 기존 예약 작업에서 매주 실행하세요.
 
 ## 데모
 
