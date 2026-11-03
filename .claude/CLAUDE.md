@@ -26,7 +26,6 @@
 ### 환경변수 관리
 **공통 API 키는 global.env에서 복사하세요:**
 ```bash
-cat ~/.config/claude-projects/global.env
 ```
 
 ### ⚠️ 주의사항
@@ -36,6 +35,4 @@ cat ~/.config/claude-projects/global.env
 - **중복 체크** - memU `/check-similar` 사용
 
 ### 참조 문서
-- 프로젝트 목록: `/home/kkaemo/projects/PROJECTS_OVERVIEW.md`
-- 포트 맵: `/home/kkaemo/projects/ROUTING.md`
 <!-- INFRASTRUCTURE_AUTOGEN_END -->

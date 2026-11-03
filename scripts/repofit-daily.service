@@ -3,5 +3,5 @@ Description=RepoFit daily Markdown digest
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/kkaemo/projects/repofit
-ExecStart=/home/kkaemo/projects/repofit/.venv/bin/gt digest
+WorkingDirectory=/path/to/repofit
+ExecStart=/path/to/repofit/.venv/bin/gt digest

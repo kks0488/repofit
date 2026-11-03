@@ -39,7 +39,7 @@ An OpenAI-compatible model writes a short summary, use cases and risks for each 
 <td width="50%" valign="top">
 
 ### Matched to your projects
-Register projects by hand, sync them from your GitHub account, or scan a local folder. `gt weekly-match` filters by stack and keywords, then reranks with pgvector embeddings.
+Register projects by hand, sync them from your GitHub account, or scan a local folder. `gt weekly-match` pulls candidates above the star threshold with pgvector embeddings, then reranks by stack overlap and quality.
 
 </td>
 <td width="50%" valign="top">
@@ -193,7 +193,7 @@ flowchart LR
 ```
 
 - **Daily score:** `0.5 × trend (stars today / 250) + 0.3 × growth (stars today ÷ total × 8) + 0.2 × quality`, each capped at 1.
-- **Weekly match:** stage 1 filters by tech stack, keywords and quality; stage 2 reranks by embedding similarity (`text-embedding-3-small`).
+- **Weekly match:** stage 1 filters for repos above the star threshold with embeddings and pulls candidates by pgvector similarity (`text-embedding-3-small`); stage 2 reranks by tech stack overlap and quality score.
   `score = 0.5 × embedding_similarity + 0.3 × stack_overlap + 0.2 × quality_score`
 
 ## FAQ
@@ -287,7 +287,7 @@ Matches require shared topics/keywords beyond a language match; they are candida
 No database setup is needed. JSON and Markdown artifacts are also retained for 90 days.
 
 On the owner's Mac, `~/Library/LaunchAgents/com.kks.repofit-notify.plist` runs
-`scripts/repofit-notify.sh` daily at **08:07 local time**. It pulls `main` with `--ff-only`
+`scripts/repofit-notify.sh` every Monday at **08:07 local time**. It pulls `main` with `--ff-only`
 and runs `gt fit`, showing up to two adoption recommendations (otherwise three repo names) under **repofit 오늘의 오픈소스**. If today's digest is
 delayed, the notification labels the latest available digest's date. Run the script manually
 to test it; notification banners follow macOS notification settings and surface

@@ -39,7 +39,7 @@ OpenAI 호환 모델이 레포마다 요약·활용 예·위험 요소를 씁니
 <td width="50%" valign="top">
 
 ### 내 프로젝트와 매칭
-프로젝트를 직접 등록하거나, GitHub 계정에서 가져오거나, 로컬 폴더를 스캔합니다. `gt weekly-match`가 스택·키워드로 거른 뒤 pgvector 임베딩으로 다시 정렬합니다.
+프로젝트를 직접 등록하거나, GitHub 계정에서 가져오거나, 로컬 폴더를 스캔합니다. `gt weekly-match`가 별 수와 임베딩이 있는 레포에서 pgvector 유사도로 후보를 뽑은 뒤 기술 스택 겹침과 품질 점수로 다시 정렬합니다.
 
 </td>
 <td width="50%" valign="top">
@@ -111,7 +111,7 @@ flowchart LR
 ```
 
 - **일일 점수:** `0.5 × 추세(오늘 별 / 250) + 0.3 × 성장(오늘 별 ÷ 전체 별 × 8) + 0.2 × 품질`, 각 항목 최대 1.
-- **주간 매칭:** 1단계에서 기술 스택·키워드·품질로 거르고, 2단계에서 임베딩 유사도(`text-embedding-3-small`)로 다시 정렬합니다.
+- **주간 매칭:** 1단계에서 별 수와 임베딩이 있는 레포 중 벡터 유사도(`text-embedding-3-small`)로 후보를 뽑고, 2단계에서 기술 스택 겹침과 품질 점수로 다시 정렬합니다.
   `score = 0.5 × embedding_similarity + 0.3 × stack_overlap + 0.2 × quality_score`
 
 ## 자주 묻는 질문
@@ -203,7 +203,7 @@ GitHub Actions: `.github/workflows/daily-sync.yml`이 매일 **한국 시간 07:
 `NEBIUS_API_KEY` 또는 `OPENAI_API_KEY` 시크릿을 넣으면 AI 요약을 씁니다.
 JSON과 Markdown 파일은 실행 기록에도 90일간 보관됩니다.
 
-사장님 Mac의 `~/Library/LaunchAgents/com.kks.repofit-notify.plist`가 매일 **현지 시간 08:07**에
+사장님 Mac의 `~/Library/LaunchAgents/com.kks.repofit-notify.plist`가 매주 월요일 **현지 시간 08:07**에
 `scripts/repofit-notify.sh`를 실행합니다. 최신 `main`을 받아 `gt fit`을 실행하고 도입 추천 최대 2개(없거나 실패하면 상위 레포 3개)를
 **repofit 오늘의 오픈소스** 알림으로 표시합니다. GitHub 실행이 늦으면 가장 최근 파일의 날짜를 함께 표시합니다.
 스크립트를 직접 실행해 시험할 수 있으며, 배너 표시는 macOS 알림 설정을 따릅니다.
