@@ -5,11 +5,14 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import tarfile
 import tempfile
+import threading
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
@@ -17,6 +20,7 @@ from urllib.parse import quote
 import httpx
 
 from src.analyzer.fit import REPO_NAME, load_repos
+from src.process_tree import run_judge
 from src.utils import build_github_api_headers
 
 SKILLADOPT_VERSION = "0.1.11"
@@ -197,7 +201,8 @@ def external_temp_dir(target: Path) -> Path:
 
 def run_preview(
     command: list[str], target: Path, token: str | None, tarball: Path | None = None,
-    *, timings: dict[str, float] | None = None,
+    *, timings: dict[str, float] | None = None, judge_timeout: float = 900,
+    cancel: threading.Event | None = None,
 ) -> dict:
     if timings is None:
         timings = {}
@@ -212,9 +217,9 @@ def run_preview(
         if tarball is not None:
             invocation = ["npx", "--yes", "--package", str(tarball), "skilladopt", *command[3:]]
         with measure(timings, "skilladopt"):
-            result = subprocess.run(
+            result = run_judge(
                 [*invocation, "--dry-run", "--json", "--worker", "codex"], cwd=copy, env=env,
-                capture_output=True, text=True, timeout=900,
+                timeout=judge_timeout, cancel=cancel,
             )
         # Refusals and reviews intentionally exit 1; their JSON still belongs in the report.
         if result.returncode not in {0, 1, 2} or len(result.stdout.strip().splitlines()) != 1:
@@ -252,11 +257,16 @@ def preview_report(
     rows: list[dict], client: httpx.Client, *, target_dir: Path | None,
     projects_dir: Path, maximum: int = 5, version: str = SKILLADOPT_VERSION,
     tarball: Path | None = None, per_repo: int = 2, started_at: float | None = None,
+    jobs: int = 3, judge_timeout: int = 900,
 ) -> str:
     started = time.perf_counter() if started_at is None else started_at
     timings = {"copy": 0.0, "skilladopt": 0.0, "github": 0.0}
     if not 1 <= maximum <= 5:
         raise ValueError("--max must be between 1 and 5")
+    if jobs < 1:
+        raise ValueError("--jobs must be at least 1")
+    if judge_timeout < 1:
+        raise ValueError("--judge-timeout must be at least 1 second")
     if per_repo < 1:
         raise ValueError("--per-repo must be at least 1")
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?", version):
@@ -290,15 +300,55 @@ def preview_report(
         for row, commit, paths in sources if index < len(paths)
     ][:maximum]
     counts = Counter(row["full_name"] for row, _, _ in selected)
-    for count, (row, commit, path) in enumerate(selected, 1):
+    cancel = threading.Event()
+
+    def judge(item):
+        row, commit, path = item
+        stage_timings = {}
+        try:
+            if cancel.is_set():
+                raise InterruptedError("Preview interrupted")
+            target = target_for(row, target_dir, projects_dir)
+            token = client.headers.get("Authorization", "").removeprefix("Bearer ") or None
+            data = run_preview(adoption_command(row["full_name"], path, commit, version),
+                               target, token, tarball, timings=stage_timings,
+                               judge_timeout=judge_timeout, cancel=cancel)
+            return data, stage_timings, None
+        except subprocess.TimeoutExpired:
+            return None, stage_timings, "judge timed out; child processes cleaned up."
+        except (OSError, subprocess.SubprocessError, tarfile.TarError, ValueError, KeyError, TypeError):
+            return None, stage_timings, "preview failed; check target Git repository, worker and skilladopt version."
+
+    # Futures run concurrently; consume them in selection order. Keep timings
+    # local to each judge so overlapping measurements never race on a shared sum.
+    executor = ThreadPoolExecutor(max_workers=jobs)
+    futures = []
+    previous_term = None
+    if threading.current_thread() is threading.main_thread():
+        def terminate(*_):
+            raise KeyboardInterrupt
+        previous_term = signal.signal(signal.SIGTERM, terminate)
+    try:
+        for item in selected:
+            futures.append(executor.submit(judge, item))
+        results = [future.result() for future in futures]
+    finally:
+        cancel.set()
+        for future in futures:
+            future.cancel()
+        try:
+            executor.shutdown(wait=True, cancel_futures=True)
+        finally:
+            if previous_term is not None:
+                signal.signal(signal.SIGTERM, previous_term)
+
+    for count, ((row, commit, path), (data, stage_timings, failure)) in enumerate(zip(selected, results), 1):
+        for stage, seconds in stage_timings.items():
+            timings[stage] += seconds
         repo = row["full_name"]
         command = adoption_command(repo, path, commit, version)
         lines.extend([f"## {count}. {_text(repo)} / {_text(path)}", "", f"- Source commit: `{commit}`"])
-        try:
-            target = target_for(row, target_dir, projects_dir)
-            auth = client.headers.get("Authorization", "")
-            token = auth.removeprefix("Bearer ") or None
-            data = run_preview(command, target, token, tarball, timings=timings)
+        if data is not None:
             lines.extend([
                 f"- License: {_text(data['license'] or 'UNKNOWN')}",
                 f"- Verdict: {_text(data['verdict'])}",
@@ -313,10 +363,9 @@ def preview_report(
                 lines.append("  - None.")
             reasons = "; ".join(str(reason) for reason in data["rejectionReasons"]) or "None."
             lines.append(f"- Refusal reason: {_text(reasons)}")
-        except (OSError, subprocess.SubprocessError, tarfile.TarError, ValueError, KeyError, TypeError):
-            # Subprocess errors can contain credentials, private paths or project text.
+        else:
             lines.extend(["- License: UNKNOWN", "- Verdict: unavailable",
-                          "- Refusal reason: preview failed; check target Git repository, worker and skilladopt version."])
+                          f"- Refusal reason: {failure}"])
         url = f"https://github.com/{repo}/blob/{commit}/{quote(path)}"
         lines.extend([f"- Skill: {url}", "- Adoption command (run in the chosen project after review):",
                       "", "```bash", shlex.join(command), "```", ""])
@@ -324,11 +373,12 @@ def preview_report(
     elapsed = time.perf_counter() - started
     summary = [
         "# Weekly skill preview", "",
-        f"- Total elapsed: {elapsed:.3f} s",
-        f"- Temporary copies (tracked HEAD files only): {timings['copy']:.3f} s",
-        f"- skilladopt / Codex (including startup and source fetch): {timings['skilladopt']:.3f} s",
-        f"- GitHub discovery: {timings['github']:.3f} s",
-        f"- Other (setup, validation, cleanup): {max(0.0, elapsed - sum(timings.values())):.3f} s",
+        f"Jobs: {jobs}; judge timeout: {judge_timeout} s.", "",
+        "| Timing | Seconds |", "|---|---:|",
+        f"| Wall-clock total (벽시계 전체) | {elapsed:.3f} |",
+        f"| Judgment sum (판정 합, 동시라 겹침) | {timings['skilladopt']:.3f} |",
+        f"| Temporary copies sum (tracked HEAD files only, may overlap) | {timings['copy']:.3f} |",
+        f"| GitHub discovery | {timings['github']:.3f} |", "",
         f"- Skills selected by repository (limit {per_repo} each): "
         + (", ".join(f"{_text(repo)}: {number}" for repo, number in counts.items()) or "None."),
         "",

@@ -73,7 +73,7 @@ def test_report_caps_skills_globally_and_includes_adoption_commands(tmp_path, mo
     monkeypatch.setattr(sp, "run_preview", run)
     rows = [{"full_name": "org/first"}, {"full_name": "org/second"}]
     with client_for(("skills/a/SKILL.md", "skills/b/SKILL.md", "skills/c/SKILL.md")) as client:
-        report = sp.preview_report(rows, client, target_dir=tmp_path, projects_dir=tmp_path, maximum=2)
+        report = sp.preview_report(rows, client, target_dir=tmp_path, projects_dir=tmp_path, maximum=2, jobs=1)
     assert len(calls) == 2
     assert all(call[1:] == (tmp_path, "fake-token") for call in calls)
     assert [call[0][-2].split("/skills/")[0] for call in calls] == ["org/first", "org/second"]
@@ -108,7 +108,7 @@ def test_preview_copies_head_files_and_never_mutates_source(tmp_path, monkeypatc
         (cwd / "README.md").write_text("changed by child")
         return SimpleNamespace(returncode=1, stdout=json.dumps(answer("needs-review")), stderr="private ignored")
 
-    monkeypatch.setattr(sp.subprocess, "run", run)
+    monkeypatch.setattr(sp, "run_judge", run)
     data = sp.run_preview(sp.adoption_command("org/skills", "skills/helper/SKILL.md", COMMIT, "0.1.11"), project, "not-printed")
     assert data["verdict"] == "needs-review"
     assert snapshot(project) == before
@@ -124,7 +124,7 @@ def test_bad_worker_output_is_refused_and_temporary_copy_removed(tmp_path, monke
         directories.append(destination)
 
     monkeypatch.setattr(sp, "copy_project", copy)
-    monkeypatch.setattr(sp.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=code, stdout=output))
+    monkeypatch.setattr(sp, "run_judge", lambda *args, **kwargs: SimpleNamespace(returncode=code, stdout=output))
     with pytest.raises(ValueError):
         sp.run_preview(sp.adoption_command("org/skills", "SKILL.md", COMMIT, "0.1.11"), tmp_path, None)
     assert directories and not directories[0].exists()
@@ -138,7 +138,7 @@ def test_tarball_invocation_for_unpublished_integration(tmp_path, monkeypatch):
         calls.append(args)
         return SimpleNamespace(returncode=0, stdout=json.dumps(answer()))
 
-    monkeypatch.setattr(sp.subprocess, "run", run)
+    monkeypatch.setattr(sp, "run_judge", run)
     package = tmp_path / "skilladopt.tgz"
     command = sp.adoption_command("org/skills", "SKILL.md", COMMIT, "0.1.11")
     sp.run_preview(command, tmp_path, None, package)
@@ -248,7 +248,7 @@ def test_tempdir_inside_target_cannot_make_repofit_write_there(tmp_path, monkeyp
         destination.mkdir()
 
     monkeypatch.setattr(sp, "copy_project", copy)
-    monkeypatch.setattr(sp.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
+    monkeypatch.setattr(sp, "run_judge", lambda *args, **kwargs: SimpleNamespace(
         returncode=0, stdout=json.dumps(answer()),
     ))
     sp.run_preview(sp.adoption_command("org/skills", "SKILL.md", COMMIT, "0.1.11"), project, None)
@@ -299,7 +299,7 @@ def test_archive_without_head_is_reported_and_cleaned_up(tmp_path):
                                    target_dir=project, projects_dir=tmp_path)
     assert "Verdict: unavailable" in report
     assert snapshot(project) == before
-    assert "Total elapsed:" in report
+    assert "Wall-clock total (벽시계 전체)" in report
 
 
 def test_archive_preserves_head_files_despite_export_attributes(tmp_path):
@@ -357,7 +357,7 @@ def test_selection_rotates_and_respects_repository_cap(tmp_path, monkeypatch, pe
     rows = [{"full_name": f"org/{name}"} for name in ("first", "second", "third")]
     with client_for(("skills/a/SKILL.md", "skills/b/SKILL.md", "skills/c/SKILL.md")) as client:
         report = sp.preview_report(rows, client, target_dir=tmp_path, projects_dir=tmp_path,
-                                   maximum=5, per_repo=per_repo)
+                                   maximum=5, per_repo=per_repo, jobs=1)
     assert [command[-2].split("/")[1] for command in calls] == expected
     assert "Skills selected by repository" in report.split("## 1.")[0]
     for name in dict.fromkeys(expected):
@@ -420,16 +420,16 @@ def test_report_timing_includes_all_stages_and_cli_setup(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sp, "discover_skills", discover)
     monkeypatch.setattr(sp, "copy_project", copy)
-    monkeypatch.setattr(sp.subprocess, "run", run)
+    monkeypatch.setattr(sp, "run_judge", run)
     with client_for() as client:
         report = sp.preview_report([{"full_name": "org/skills"}], client, target_dir=tmp_path,
                                    projects_dir=tmp_path, started_at=7.0)
     heading = report.split("## 1.")[0]
-    assert "Total elapsed: 13.000 s" in heading
-    assert "Temporary copies (tracked HEAD files only): 2.000 s" in heading
-    assert "skilladopt / Codex (including startup and source fetch): 5.000 s" in heading
-    assert "GitHub discovery: 3.000 s" in heading
-    assert "Other (setup, validation, cleanup): 3.000 s" in heading
+    assert "Wall-clock total (벽시계 전체) | 13.000" in heading
+    assert "Temporary copies sum (tracked HEAD files only, may overlap) | 2.000" in heading
+    assert "Judgment sum (판정 합, 동시라 겹침) | 5.000" in heading
+    assert "GitHub discovery | 3.000" in heading
+    assert "Jobs: 3; judge timeout: 900 s." in heading
     assert "org/skills: 1" in heading
 
 
@@ -458,15 +458,15 @@ def test_failed_stages_are_timed_and_reported(tmp_path, monkeypatch, failed_stag
 
     monkeypatch.setattr(sp, "discover_skills", discover)
     monkeypatch.setattr(sp, "copy_project", copy)
-    monkeypatch.setattr(sp.subprocess, "run", run)
+    monkeypatch.setattr(sp, "run_judge", run)
     with client_for() as client:
         report = sp.preview_report([{"full_name": "org/skills"}], client, target_dir=tmp_path, projects_dir=tmp_path)
-    assert "GitHub discovery: 3.000 s" in report
+    assert "GitHub discovery | 3.000" in report
     if failed_stage != "github":
-        assert "Temporary copies (tracked HEAD files only): 2.000 s" in report
+        assert "Temporary copies sum (tracked HEAD files only, may overlap) | 2.000" in report
         assert "Verdict: unavailable" in report
     if failed_stage == "skilladopt":
-        assert "skilladopt / Codex (including startup and source fetch): 5.000 s" in report
+        assert "Judgment sum (판정 합, 동시라 겹침) | 5.000" in report
     if failed_stage == "github":
         assert "Skills selected by repository (limit 2 each): None." in report
         assert "Skills previewed: 0/5." in report
@@ -485,3 +485,193 @@ def test_cli_passes_per_repository_limit(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "org/skills: 1" in output.read_text()
     assert "Skills previewed: 1/5." in output.read_text()
+
+
+@pytest.fixture
+def fake_judge(tmp_path):
+    """Local judge with a detached Python child and detached sleep grandchild."""
+    script = tmp_path / "judge.py"
+    script.write_text('''import json, os, subprocess, sys, time
+from pathlib import Path
+records = Path(sys.argv[1])
+name = sys.argv[3] if "#" in sys.argv[2] else sys.argv[2]
+records.mkdir(exist_ok=True)
+child_code = """import os, signal, subprocess, sys, time
+from pathlib import Path
+if sys.argv[2] == 'ignore':
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+p = subprocess.Popen(['sleep', '60'], start_new_session=True,
+                     env={} if sys.argv[2] == 'stripped' else None)
+Path(sys.argv[1]).write_text(str(os.getpid()) + ' ' + str(p.pid))
+if sys.argv[2] not in {'orphan', 'stripped'}:
+    p.wait()
+"""
+mode = os.environ.get('FAKE_JUDGE_MODE', 'normal')
+p = subprocess.Popen([sys.executable, '-c', child_code, str(records / name), mode],
+                     start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+while not (records / name).exists():
+    time.sleep(0.005)
+time.sleep({'first': 1.6, 'second': 1.4, 'third': 1.2}.get(name, 60))
+result = json.loads(os.environ['FAKE_JUDGE_JSON'])
+result['jobId'] = name
+print(json.dumps(result), flush=True)
+''')
+    return script
+
+
+def assert_recorded_processes_gone(records):
+    from src.process_tree import process_table
+
+    pids = [int(pid) for file in records.iterdir() for pid in file.read_text().split()]
+    assert pids
+    assert not set(pids) & process_table().keys()
+
+
+def test_real_parallel_judges_are_faster_ordered_and_isolated(tmp_path, monkeypatch, fake_judge):
+    import sys
+    import time
+
+    project = git_project(tmp_path)
+    before = snapshot(project)
+    monkeypatch.setenv("FAKE_JUDGE_JSON", json.dumps(answer()))
+    monkeypatch.setattr(sp, "discover_skills", lambda *args: (COMMIT, ["SKILL.md"]))
+    rows = [{"full_name": f"org/{name}"} for name in ("first", "second", "third")]
+    elapsed = {}
+    copies = []
+    actual_copy = sp.copy_project
+
+    def copy(target, destination):
+        copies.append(destination)
+        actual_copy(target, destination)
+
+    monkeypatch.setattr(sp, "copy_project", copy)
+    for jobs in (1, 3):
+        records = tmp_path / f"records-{jobs}"
+        monkeypatch.setattr(sp, "adoption_command", lambda repo, path, commit, version: [
+            sys.executable, str(fake_judge), str(records), f"{repo}#{commit}", repo.split('/')[1],
+        ])
+        started = time.monotonic()
+        with client_for() as client:
+            report = sp.preview_report(rows, client, target_dir=project, projects_dir=tmp_path,
+                                       jobs=jobs, judge_timeout=10)
+        elapsed[jobs] = time.monotonic() - started
+        positions = [report.index(f"## {i}. org/{name}") for i, name in enumerate(("first", "second", "third"), 1)]
+        assert positions == sorted(positions)
+        for name in ("first", "second", "third"):
+            assert f"- Job: {name} " in report
+        assert_recorded_processes_gone(records)
+    assert elapsed[3] < elapsed[1] * 0.8, elapsed
+    assert len(set(copies)) == 6
+    assert all(not path.exists() for path in copies)
+    assert snapshot(project) == before
+
+
+@pytest.mark.parametrize("mode", ["normal", "ignore", "orphan", "stripped"])
+def test_timeout_kills_detached_descendants_and_preserves_unrelated_process(
+    tmp_path, monkeypatch, fake_judge, mode,
+):
+    import os
+    import sys
+
+    from src.process_tree import run_judge
+
+    monkeypatch.setenv("FAKE_JUDGE_JSON", json.dumps(answer()))
+    records = tmp_path / "records"
+    sentinel = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            run_judge([sys.executable, str(fake_judge), str(records), "slow"], cwd=tmp_path,
+                      env={**os.environ, "FAKE_JUDGE_MODE": mode}, timeout=0.5)
+        assert_recorded_processes_gone(records)
+        assert sentinel.poll() is None
+    finally:
+        sentinel.terminate()
+        sentinel.wait()
+
+
+@pytest.mark.parametrize("interrupt_signal", ["SIGINT", "SIGTERM"])
+def test_ctrl_c_cleans_running_judges_and_cancels_queued_work(tmp_path, fake_judge, interrupt_signal):
+    import os
+    import signal
+    import sys
+    import time
+
+    records = tmp_path / "records"
+    runner = tmp_path / "interrupt.py"
+    runner.write_text('''import json, sys
+from pathlib import Path
+import httpx
+from src import skill_preview as sp
+sp.copy_project = lambda target, destination: destination.mkdir()
+sp.discover_skills = lambda *args: ('a' * 40, ['SKILL.md'])
+sp.adoption_command = lambda repo, path, commit, version: [sys.executable, sys.argv[1], sys.argv[2], repo.split('/')[1]]
+with httpx.Client() as client:
+    sp.preview_report([{'full_name': 'org/' + n} for n in ['slow1', 'slow2', 'queued']], client,
+                      target_dir=Path(sys.argv[3]), projects_dir=Path(sys.argv[3]), jobs=2)
+''')
+    process = subprocess.Popen([sys.executable, str(runner), str(fake_judge), str(records), str(tmp_path)],
+                               env={**os.environ, "PYTHONPATH": str(Path.cwd()),
+                                    "FAKE_JUDGE_JSON": json.dumps(answer())},
+                               start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 10
+        while not records.exists() or len(list(records.iterdir())) < 2:
+            assert process.poll() is None
+            assert time.monotonic() < deadline
+            time.sleep(0.02)
+        # Same delivery as terminal Ctrl+C: signal the foreground process group.
+        os.killpg(process.pid, getattr(signal, interrupt_signal))
+        process.communicate(timeout=12)
+        assert process.returncode != 0
+        assert not (records / "queued").exists()
+        assert_recorded_processes_gone(records)
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.communicate()
+
+
+@pytest.mark.parametrize("flag", ["--jobs", "--judge-timeout"])
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_invalid_judge_options_refused(flag, value, tmp_path):
+    result = CliRunner().invoke(cli.app, ["skill-preview", flag, value])
+    assert result.exit_code == 2
+    option = "jobs" if flag == "--jobs" else "judge_timeout"
+    with client_for() as client, pytest.raises(ValueError, match=flag):
+        sp.preview_report([], client, target_dir=tmp_path, projects_dir=tmp_path, **{option: int(value)})
+
+
+def test_cli_passes_jobs_and_timeout(tmp_path, monkeypatch):
+    project = git_project(tmp_path)
+    calls = []
+    monkeypatch.setattr(sp, "github_headers", lambda: {})
+    monkeypatch.setattr(sp, "discover_skills", lambda *args: (COMMIT, ["SKILL.md"]))
+    monkeypatch.setattr(sp, "run_preview", lambda *args, **kwargs: calls.append(kwargs) or answer())
+    output = tmp_path / "report.md"
+    result = CliRunner().invoke(cli.app, ["skill-preview", "--repos", "org/skills", "--jobs", "1",
+                                          "--judge-timeout", "12", "--target-dir", str(project),
+                                          "--output", str(output)])
+    assert result.exit_code == 0, result.output
+    assert calls[0]["judge_timeout"] == 12
+    assert "Jobs: 1; judge timeout: 12 s." in output.read_text()
+
+
+
+def test_ps_fallback_tracks_detached_marker_without_claiming_scanner(tmp_path, monkeypatch):
+    from src import process_tree as pt
+
+    monkeypatch.setattr(pt.sys, "platform", "darwin")
+    tracker = pt.JudgeProcesses(adopt_orphans=True)
+
+    def ps(command, **kwargs):
+        if command[1] == "-axo":
+            # The scanner is our direct child but is not a judge descendant.
+            return SimpleNamespace(stdout=(
+                f"101 {tracker.owner} 101 Wed Nov 4 12:00:00 2026 S\n"
+                "202 1 202 Wed Nov 4 12:00:01 2026 S\n"
+                "203 202 203 Wed Nov 4 12:00:02 2026 S\n"
+            ))
+        return SimpleNamespace(stdout=f"202 judge {pt.MARKER}={tracker.marker}\n101 ps\n")
+
+    monkeypatch.setattr(pt.subprocess, "run", ps)
+    assert set(tracker.scan()) == {202, 203}
