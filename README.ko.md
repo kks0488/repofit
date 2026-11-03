@@ -203,7 +203,7 @@ GitHub Actions: `.github/workflows/daily-sync.yml`이 매일 **한국 시간 07:
 `NEBIUS_API_KEY` 또는 `OPENAI_API_KEY` 시크릿을 넣으면 AI 요약을 씁니다.
 JSON과 Markdown 파일은 실행 기록에도 90일간 보관됩니다.
 
-사장님 Mac의 `~/Library/LaunchAgents/com.kks.repofit-notify.plist`가 매주 월요일 **현지 시간 08:07**에
+소유자 Mac의 `~/Library/LaunchAgents/com.kks.repofit-notify.plist`가 매주 월요일 **현지 시간 08:07**에
 `scripts/repofit-notify.sh`를 실행합니다. 최신 `main`을 받아 `gt fit`을 실행하고 도입 추천 최대 2개(없거나 실패하면 상위 레포 3개)를
 **repofit 오늘의 오픈소스** 알림으로 표시합니다. GitHub 실행이 늦으면 가장 최근 파일의 날짜를 함께 표시합니다.
 스크립트를 직접 실행해 시험할 수 있으며, 배너 표시는 macOS 알림 설정을 따릅니다.
